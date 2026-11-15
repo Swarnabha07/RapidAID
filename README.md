@@ -325,10 +325,10 @@ All demonstration data should be simulated. Do not publish real victim informati
 
 | Team Member | Responsibility |
 |:---|:---|
-| **Member 1** | On-device AI and Offline Pipeline |
-| **Member 2** | Cloud AI and Firebase AI Logic |
-| **Member 3** | Backend, Firestore and Authentication |
-| **Member 4** | Dashboards, UI and Demo |
+| **Swarnabha Banerjee** | Backend, AI Logic and API integration |
+| **Abhirup Sarkar** | Front-end, Security and Code Fixes |
+| **Rana Pratap Roy** | Backend, Firestore and Authentication |
+| **Snehasish Saha** | Dashboards, UI and Demo |
 
 </div>
 
