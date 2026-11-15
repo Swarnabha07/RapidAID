@@ -5,9 +5,7 @@ export function CitizenHeader() {
     <header className="sticky top-0 z-30 border-b border-black/8 bg-white">
       <div className="mx-auto flex h-16 max-w-5xl items-center justify-between px-5 sm:px-6">
         <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-blue text-base font-bold text-white">
-            +
-          </span>
+          <img src="/logo.svg" alt="RapidAID Logo" className="h-9 w-9 object-contain" />
           <span className="text-[15px] font-semibold text-text-primary">
             RapidAID
           </span>
