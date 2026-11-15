@@ -45,25 +45,8 @@ Most disaster-response applications assume reliable internet connectivity — pr
 
 ### One platform. Two AI environments. Continuous response.
 
-```text
-           NO SIGNAL                  SIGNAL RETURNS
-      ┌──────────────────┐        ┌────────────────────┐
-      │                  │        │                    │
-      │   ⚡ GEMINI NANO  │        │   ☁ CLOUD GEMINI   │
-      │                  │        │                    │
-      │  On-device AI    │        │  Advanced analysis │
-      │  Instant triage  │        │  Duplicate merging│
-      │  Urgency tagging │        │  Case enrichment  │
-      │  Local processing│        │  Smart summaries  │
-      │                  │        │                    │
-      └────────┬─────────┘        └─────────┬──────────┘
-               │                            │
-               ▼                            ▼
-        📦 LOCAL QUEUE  ──────────────►  🔥 FIRESTORE
-               │                            │
-               ▼                            ▼
-        INSTANT RESPONSE               CLOUD ENHANCED
-```
+<img width="378" height="492" alt="Signal Restored_ Cloud AI Workflow" src="https://github.com/user-attachments/assets/941104fc-5f47-409f-a8dd-98631ce599d9" />
+
 
 </div>
 
