@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+:root {
+  /* Surfaces */
+  --surface-canvas: #ffffff;
+  --surface-subtle: #f6f7f9;
+  --surface-muted: #eef0f3;
+  --surface-ink: #0a0e17;
+  --surface-ink-raised: #0f1420;
+  --surface-ink-border: #1e2636;
+
+  /* Text */
+  --text-primary: #0b0f19;
+  --text-secondary: #5b6472;
+  --text-inverse: #f4f6f9;
+  --text-inverse-muted: #9aa5b5;
+
+  /* Brand */
+  --brand-blue: #2d5bf0;
+  --brand-blue-hover: #2548c7;
+  --brand-teal: #14b8a6;
+  --brand-teal-soft: #ccfbf1;
+
+  /* Status */
+  --status-critical: #e5484d;
+  --status-critical-soft: #3a1518;
+  --status-high: #f0973a;
+  --status-high-soft: #3a2712;
+  --status-medium: #c9a227;
+  --status-medium-soft: #332c10;
+  --status-normal: #2fae60;
+  --status-normal-soft: #102a1c;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+}
+
+@theme inline {
+  --color-canvas: var(--surface-canvas);
+  --color-subtle: var(--surface-subtle);
+  --color-muted: var(--surface-muted);
+  --color-ink: var(--surface-ink);
+  --color-ink-raised: var(--surface-ink-raised);
+  --color-ink-border: var(--surface-ink-border);
+
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-inverse: var(--text-inverse);
+  --color-text-inverse-muted: var(--text-inverse-muted);
+
+  --color-brand-blue: var(--brand-blue);
+  --color-brand-blue-hover: var(--brand-blue-hover);
+  --color-brand-teal: var(--brand-teal);
+  --color-brand-teal-soft: var(--brand-teal-soft);
+
+  --color-critical: var(--status-critical);
+  --color-critical-soft: var(--status-critical-soft);
+  --color-high: var(--status-high);
+  --color-high-soft: var(--status-high-soft);
+  --color-medium: var(--status-medium);
+  --color-medium-soft: var(--status-medium-soft);
+  --color-normal: var(--status-normal);
+  --color-normal-soft: var(--status-normal-soft);
+
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+
+body {
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--brand-blue);
+  color: white;
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background: var(--surface-ink-border);
+  border-radius: 999px;
+}
