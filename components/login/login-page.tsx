@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AuthShell } from "@/components/login/auth-shell";
 import { SignInForm, type SignInOutcome } from "@/components/login/sign-in-form";
 import { ForgotPasswordForm } from "@/components/login/forgot-password-form";
 import { SignedInPanel } from "@/components/login/signed-in-panel";
 import { AccessRestrictedPanel } from "@/components/login/access-restricted-panel";
+import { useAuth, getRoleRedirectPath, signOutUser } from "@/lib/firebase/auth";
 
 type View =
   | { name: "signin" }
@@ -18,20 +19,30 @@ export function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const sessionExpired = searchParams.get("session") === "expired";
+  const { user, profile, role, loading } = useAuth();
   const [view, setView] = useState<View>({ name: "signin" });
+
+  // If user is already authenticated and not expired, display signed-in panel
+  useEffect(() => {
+    if (!loading && user && !sessionExpired) {
+      const activeRole = role || profile?.role || "victim";
+      setView({
+        name: "signed-in",
+        name_: user.displayName || profile?.displayName || user.email?.split("@")[0] || "User",
+        email: user.email || "",
+        role: activeRole,
+      });
+    }
+  }, [loading, user, role, profile, sessionExpired]);
 
   function handleOutcome(outcome: SignInOutcome) {
     if (outcome.status === "success") {
-      setView({
-        name: "signed-in",
-        name_: outcome.name,
-        email: outcome.email,
-        role: outcome.role,
-      });
+      // Automatic role-based redirect
+      const targetRoute = getRoleRedirectPath(outcome.role);
+      router.push(targetRoute);
     } else if (outcome.status === "restricted") {
       setView({ name: "restricted", email: outcome.email });
     }
-    // "error" is handled inside SignInForm itself via its own banner.
   }
 
   return (
@@ -53,15 +64,19 @@ export function LoginPage() {
           name={view.name_}
           email={view.email}
           role={view.role}
-          onContinue={() => router.push("/dashboard")}
-          onSwitchAccount={() => setView({ name: "signin" })}
+          onContinue={() => router.push(getRoleRedirectPath(view.role))}
+          onSwitchAccount={() => {
+            signOutUser().then(() => setView({ name: "signin" }));
+          }}
         />
       )}
 
       {view.name === "restricted" && (
         <AccessRestrictedPanel
           email={view.email}
-          onSwitchAccount={() => setView({ name: "signin" })}
+          onSwitchAccount={() => {
+            signOutUser().then(() => setView({ name: "signin" }));
+          }}
         />
       )}
     </AuthShell>

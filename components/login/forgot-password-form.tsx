@@ -4,19 +4,34 @@ import { useState } from "react";
 import { Loader2, Mail } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { TextField } from "@/components/ui/text-field";
+import { resetPassword } from "@/lib/firebase/auth";
 
 export function ForgotPasswordForm({ onBack }: { onBack: () => void }) {
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
   const [sent, setSent] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (loading || !email.trim()) return;
     setLoading(true);
-    await new Promise((resolve) => setTimeout(resolve, 700));
-    setLoading(false);
-    setSent(true);
+    setErrorMessage("");
+
+    try {
+      await resetPassword(email.trim());
+      setSent(true);
+    } catch (err: any) {
+      console.error("Password reset error:", err);
+      if (err.code === "auth/invalid-email") {
+        setErrorMessage("Please enter a valid email address.");
+      } else {
+        // For general security, still display sent message to avoid user enumeration
+        setSent(true);
+      }
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -39,8 +54,13 @@ export function ForgotPasswordForm({ onBack }: { onBack: () => void }) {
           placeholder="you@organization.org"
           autoComplete="username"
           value={email}
+          error={Boolean(errorMessage)}
           onChange={(e) => setEmail(e.target.value)}
         />
+
+        {errorMessage && (
+          <p className="text-xs text-critical">{errorMessage}</p>
+        )}
 
         <Button type="submit" size="lg" className="w-full" disabled={loading} aria-busy={loading}>
           {loading ? (

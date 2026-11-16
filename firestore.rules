@@ -1,0 +1,129 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (Firebase Auth UID)
+    // Fields:
+    //   - role: string (allowed: 'medical', 'rescue', 'admin', 'citizen')
+    //   - name: string (optional)
+    //   - email: string (optional)
+    //   - createdAt: timestamp (optional)
+    //
+    // Collection: reports
+    // Document ID: {reportId}
+    // Fields:
+    //   - reportId: string
+    //   - userId: string (required, creator's Auth UID)
+    //   - category: string ('medical' | 'water' | 'shelter' | 'missing_person' | 'other')
+    //   - urgency: string ('critical' | 'high' | 'normal')
+    //   - description: string
+    //   - location: map (lat: number, lng: number)
+    //   - status: string ('received' | 'in_progress' | 'dispatched' | 'resolved')
+    //   - assignedDashboard: string ('medical' | 'rescue')
+    //   - createdAt: timestamp
+    //   - updatedAt: timestamp
+    //
+    // Collection: alerts
+    // Document ID: {alertId}
+    // Fields:
+    //   - alertId: string
+    //   - title: string
+    //   - message: string
+    //   - severity: string ('info' | 'warning' | 'critical')
+    //   - area: string
+    //   - createdBy: string
+    //   - createdAt: timestamp
+    //   - expiresAt: timestamp
+    //
+    // Collection: resources
+    // Document ID: {resourceId}
+    // Fields:
+    //   - resourceId: string
+    //   - dashboard: string ('medical' | 'rescue')
+    //   - type: string
+    //   - quantityAvailable: number
+    //   - location: string | map
+    //   - updatedAt: timestamp
+    //
+    // Collection: escalationLog
+    // Document ID: {logId}
+    // Fields:
+    //   - incidentId: string
+    //   - escalatedAt: timestamp
+    //   - escalationLevel: number
+    //   - reason: string
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    // Check if the user is authenticated
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Retrieve user role from auth token claim, or fallback safely to users doc
+    function getUserRole() {
+      return isSignedIn() && ('role' in request.auth.token && request.auth.token.role != null)
+        ? request.auth.token.role
+        : (isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && ('role' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data)
+            ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
+            : null);
+    }
+
+    // Check if user has responder privileges (medical, rescue, admin)
+    function isResponder() {
+      return getUserRole() in ["medical", "rescue", "admin"];
+    }
+
+    // ===============================================================
+    // Default Deny Rule
+    // ===============================================================
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    // reports/{reportId}
+    match /reports/{reportId} {
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isResponder());
+      allow update: if isSignedIn() && isResponder();
+      allow delete: if false;
+    }
+
+    // alerts/{alertId}
+    match /alerts/{alertId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isSignedIn() && isResponder();
+    }
+
+    // users/{userId}
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && (request.auth.uid == userId || getUserRole() == "admin");
+    }
+
+    // resources/{resourceId}
+    match /resources/{resourceId} {
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isResponder();
+    }
+
+    // escalationLog/{logId}
+    match /escalationLog/{logId} {
+      allow read: if isSignedIn() && isResponder();
+      allow write: if false;
+    }
+  }
+}
