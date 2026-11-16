@@ -1,6 +1,6 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
+# Dependencies
 /node_modules
 /.pnp
 .pnp.*
@@ -10,32 +10,73 @@
 !.yarn/releases
 !.yarn/versions
 
-# testing
-/coverage
-
-# next.js
+# Next.js & Build Outputs
 /.next/
 /out/
-
-# production
 /build
+/dist
+.turbo/
 
-# misc
-.DS_Store
+# Environment Files & Secrets
+.env
+.env*.local
+.env.production
+.env.staging
+.env.development
+.env.test
+.env*
+!.env.example
+*.local
+
+# Service Accounts, Credentials & Keys
+service-account*.json
+*.key.json
+*-credentials.json
+google-services.json
+GoogleService-Info.plist
 *.pem
+*.key
+*.crt
+*.p12
+*.pfx
 
-# debug
+# Firebase CLI Caches & Logs
+.firebase/
+firebase-debug.log*
+firestore-debug.log*
+ui-debug.log*
+database-debug.log*
+
+# Testing & Coverage
+/coverage
+*.lcov
+
+# Debug Logs & Pack Archives
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
+*.tgz
 
-# env files (can opt-in for committing if needed)
-.env*
-
-# vercel
-.vercel
-
-# typescript
+# TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Linter & Cache Artifacts
+.eslintcache
+mcp_out.txt
+mcp_err.txt
+
+# Vercel
+.vercel
+
+# Operating System & Editor Artifacts
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.idea/
+*.swp
+*.swo
+*~

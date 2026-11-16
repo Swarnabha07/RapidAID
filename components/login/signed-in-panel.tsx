@@ -1,5 +1,22 @@
-import { Check, CheckCircle2 } from "lucide-react";
+"use client";
+
+import { Check, CheckCircle2, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { signOutUser } from "@/lib/firebase/auth";
+
+function formatRoleLabel(role: string): string {
+  switch (role.toLowerCase()) {
+    case "medical":
+      return "Medical Response";
+    case "rescue":
+      return "Rescue Operations";
+    case "admin":
+      return "Administrator";
+    case "victim":
+    default:
+      return "Citizen";
+  }
+}
 
 export function SignedInPanel({
   name,
@@ -14,6 +31,15 @@ export function SignedInPanel({
   onContinue: () => void;
   onSwitchAccount: () => void;
 }) {
+  async function handleSignOut() {
+    try {
+      await signOutUser();
+    } catch (err) {
+      console.error("Sign out error:", err);
+    }
+    onSwitchAccount();
+  }
+
   return (
     <div>
       <span className="flex h-10 w-10 items-center justify-center rounded-md bg-normal-soft text-[#5fd996]">
@@ -34,8 +60,8 @@ export function SignedInPanel({
         <p className="text-sm text-text-secondary">{email}</p>
 
         <div className="mt-3 flex items-center gap-2">
-          <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 text-[12px] font-medium text-brand-blue">
-            {role}
+          <span className="rounded-full bg-brand-blue/10 px-2.5 py-1 text-[12px] font-medium text-brand-blue capitalize">
+            {formatRoleLabel(role)}
           </span>
           <span className="flex items-center gap-1 text-[12px] text-[#1f9254]">
             <Check size={13} /> Approved access
@@ -55,10 +81,10 @@ export function SignedInPanel({
       <Button
         variant="secondary"
         size="lg"
-        className="mt-4 w-full"
-        onClick={onSwitchAccount}
+        className="mt-4 w-full flex items-center justify-center gap-2 border-black/10"
+        onClick={handleSignOut}
       >
-        Use a different account
+        <LogOut size={16} /> Use a different account
       </Button>
 
       <p className="mt-10 text-center text-xs text-text-secondary">
