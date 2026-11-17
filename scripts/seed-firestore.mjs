@@ -17,8 +17,22 @@ if (fs.existsSync(envPath)) {
   }
 }
 
-const PROJECT_ID = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "rapidaid-9c11e";
-const API_KEY = process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyCmVWSVrY3e682hh_gF1GYLezmfzSdWne4";
+const PROJECT_ID =
+  process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ||
+  process.env.FIREBASE_PROJECT_ID;
+const API_KEY =
+  process.env.NEXT_PUBLIC_FIREBASE_API_KEY ||
+  process.env.FIREBASE_API_KEY;
+
+if (!PROJECT_ID) {
+  console.error("Missing NEXT_PUBLIC_FIREBASE_PROJECT_ID in environment or .env.local");
+  process.exit(1);
+}
+
+if (!API_KEY) {
+  console.error("Missing NEXT_PUBLIC_FIREBASE_API_KEY in environment or .env.local");
+  process.exit(1);
+}
 
 // Read OAuth access token from firebase-tools.json
 const configPath = path.join(
