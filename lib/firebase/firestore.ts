@@ -90,7 +90,7 @@ function createActivityRecord(
 }
 
 /**
- * Creates a new emergency report in Firestore.
+ * Creates a new emergency report in Firestore with automatic fallback to POST /api/reports.
  * Supports citizen text reports and one-tap SOS emergency submissions.
  */
 export async function createReport(data: CreateReportInput): Promise<string> {
@@ -137,9 +137,47 @@ export async function createReport(data: CreateReportInput): Promise<string> {
     reportedInjuries: data.reportedInjuries ?? null,
   };
 
-  await setDoc(reportDoc, payload);
-  return reportId;
+  try {
+    await setDoc(reportDoc, payload);
+    return reportId;
+  } catch (firestoreErr) {
+    console.warn("Direct Firestore setDoc failed, attempting /api/reports fallback:", firestoreErr);
+    try {
+      const { auth } = await import("@/lib/firebase/config");
+      const currentUser = auth.currentUser;
+      const token = currentUser ? await currentUser.getIdToken() : "";
+
+      const res = await fetch("/api/reports", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({
+          ...data,
+          urgency,
+          isSOS,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}));
+        throw new Error(errorData.error || `Server fallback failed with status ${res.status}`);
+      }
+
+      const resJson = await res.json();
+      return resJson.reportId || reportId;
+    } catch (fallbackErr) {
+      console.error("Both direct Firestore setDoc and /api/reports fallback failed:", fallbackErr);
+      throw firestoreErr;
+    }
+  }
 }
+
+/**
+ * Convenience alias for creating a report with server-side fallback.
+ */
+export const submitReportWithFallback = createReport;
 
 /**
  * Fetches a single report by ID.
@@ -232,7 +270,9 @@ export function subscribeToUserRequests(
     orderBy("createdAt", "desc")
   );
 
-  return onSnapshot(
+  let activeUnsubscribe: Unsubscribe | null = null;
+
+  activeUnsubscribe = onSnapshot(
     q,
     (snapshot) => {
       const requests = snapshot.docs.map((docSnap) => {
@@ -242,10 +282,46 @@ export function subscribeToUserRequests(
       callback(requests);
     },
     (err) => {
-      console.error("subscribeToUserRequests listener error:", err);
-      if (onError) onError(err);
+      console.warn("subscribeToUserRequests indexed query warning, trying non-indexed listener:", err);
+      // Fallback: query by userId alone and sort client-side (in case index is provisioning)
+      const fallbackQuery = query(
+        collection(db, "reports"),
+        where("userId", "==", userId)
+      );
+
+      activeUnsubscribe = onSnapshot(
+        fallbackQuery,
+        (snapshot) => {
+          const docs = snapshot.docs.map((docSnap) => ({
+            ...(docSnap.data() as Report),
+            reportId: docSnap.id,
+          }));
+          docs.sort((a, b) => {
+            const timeA = a.createdAt
+              ? typeof (a.createdAt as any).toDate === "function"
+                ? (a.createdAt as any).toDate().getTime()
+                : new Date(a.createdAt as any).getTime()
+              : 0;
+            const timeB = b.createdAt
+              ? typeof (b.createdAt as any).toDate === "function"
+                ? (b.createdAt as any).toDate().getTime()
+                : new Date(b.createdAt as any).getTime()
+              : 0;
+            return timeB - timeA;
+          });
+          callback(docs.map(mapReportToCitizenRequest));
+        },
+        (fallbackErr) => {
+          console.error("subscribeToUserRequests fallback failed:", fallbackErr);
+          if (onError) onError(fallbackErr);
+        }
+      );
     }
   );
+
+  return () => {
+    if (activeUnsubscribe) activeUnsubscribe();
+  };
 }
 
 // ---------------------------------------------------------------------------

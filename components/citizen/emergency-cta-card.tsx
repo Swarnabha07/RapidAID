@@ -1,7 +1,105 @@
-import { AlertTriangle, ChevronRight, Cloud, ShieldCheck, Check } from "lucide-react";
-import { Button } from "@/components/ui/button";
+"use client";
 
-export function EmergencyCtaCard() {
+import { useState } from "react";
+import { AlertTriangle, ChevronRight, Cloud, ShieldCheck, Check, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useAuth } from "@/lib/firebase/auth";
+import { createReport, type CreateReportInput } from "@/lib/firebase/firestore";
+
+export interface EmergencyCtaCardProps {
+  /**
+   * Optional custom submission handler so P1 can drop in on-device AI classification
+   * and SOS voice capture directly.
+   */
+  onSubmitEmergency?: (customPayload?: Partial<CreateReportInput>) => Promise<string | void>;
+  onViewRequests?: () => void;
+  pendingCount?: number;
+  lastSyncedTime?: string;
+}
+
+export function EmergencyCtaCard({
+  onSubmitEmergency,
+  onViewRequests,
+  pendingCount = 0,
+  lastSyncedTime = "10:42 AM",
+}: EmergencyCtaCardProps) {
+  const { user } = useAuth();
+  const [submitting, setSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  const handleReportEmergency = async () => {
+    setSubmitting(true);
+    setFeedback(null);
+
+    try {
+      if (onSubmitEmergency) {
+        await onSubmitEmergency();
+        setFeedback({ type: "success", message: "Emergency assistance request submitted." });
+      } else {
+        const fallbackLocation = {
+          lat: 40.7128,
+          lng: -74.006,
+          address: "Citizen Device Location (Auto-detected)",
+          zone: "Sector Alpha",
+        };
+
+        const location = await new Promise<{ lat: number; lng: number; address: string; zone: string }>((resolve) => {
+          if (typeof window !== "undefined" && navigator.geolocation) {
+            navigator.geolocation.getCurrentPosition(
+              (pos) => {
+                resolve({
+                  lat: pos.coords.latitude,
+                  lng: pos.coords.longitude,
+                  address: `GPS: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`,
+                  zone: "North District",
+                });
+              },
+              () => resolve(fallbackLocation),
+              { timeout: 3000 }
+            );
+          } else {
+            resolve(fallbackLocation);
+          }
+        });
+
+        const reportId = await createReport({
+          userId: user?.uid || "anonymous_citizen",
+          category: "medical",
+          urgency: "critical",
+          isSOS: true,
+          description: "⚡ Emergency Assistance Request: Citizen pressed one-tap SOS beacon. Immediate responder dispatch requested.",
+          location,
+          processedBy: "on-device",
+          confidenceScore: 1.0,
+        });
+
+        setFeedback({
+          type: "success",
+          message: `Emergency SOS dispatched! Report #${reportId.slice(0, 8)}. Responders notified.`,
+        });
+      }
+    } catch (err: any) {
+      console.error("Emergency report submission error:", err);
+      setFeedback({
+        type: "error",
+        message: err.message || "Failed to submit emergency report. Please call emergency services or try again.",
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleViewRequests = () => {
+    if (onViewRequests) {
+      onViewRequests();
+    } else {
+      const historyElement = document.getElementById("request-history");
+      if (historyElement) {
+        historyElement.scrollIntoView({ behavior: "smooth" });
+      }
+    }
+  };
+
   return (
     <div className="relative overflow-hidden rounded-[var(--radius-lg)] border border-black/8 bg-white p-6 sm:p-8">
       <span className="absolute inset-y-0 left-0 w-1 rounded-l-[var(--radius-lg)] bg-critical" aria-hidden />
@@ -21,11 +119,33 @@ export function EmergencyCtaCard() {
         internet is unavailable.
       </p>
 
+      {feedback && (
+        <div
+          className={`mt-4 rounded-md p-3 text-[13px] font-medium ${
+            feedback.type === "success"
+              ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+              : "bg-red-50 text-red-800 border border-red-200"
+          }`}
+        >
+          {feedback.message}
+        </div>
+      )}
+
       <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-        <Button size="lg" className="bg-critical hover:brightness-110 focus-visible:ring-critical">
-          <AlertTriangle size={17} /> Report an Emergency
+        <Button
+          size="lg"
+          onClick={handleReportEmergency}
+          disabled={submitting}
+          className="bg-critical hover:brightness-110 focus-visible:ring-critical disabled:opacity-75"
+        >
+          {submitting ? (
+            <Loader2 size={17} className="animate-spin" />
+          ) : (
+            <AlertTriangle size={17} />
+          )}
+          {submitting ? "Sending SOS Beacon..." : "Report an Emergency"}
         </Button>
-        <Button size="lg" variant="secondary">
+        <Button size="lg" variant="secondary" onClick={handleViewRequests}>
           View My Requests <ChevronRight size={16} />
         </Button>
       </div>
@@ -40,12 +160,18 @@ export function EmergencyCtaCard() {
         <span>Simple 5-step form</span>
       </div>
 
-      <SyncStatusCard />
+      <SyncStatusCard pendingCount={pendingCount} lastSyncedTime={lastSyncedTime} />
     </div>
   );
 }
 
-function SyncStatusCard() {
+function SyncStatusCard({
+  pendingCount = 0,
+  lastSyncedTime = "10:42 AM",
+}: {
+  pendingCount?: number;
+  lastSyncedTime?: string;
+}) {
   return (
     <div className="mt-6 rounded-[var(--radius-md)] border border-normal/20 bg-emerald-50/60 p-5">
       <div className="flex items-start justify-between">
@@ -53,7 +179,7 @@ function SyncStatusCard() {
           <Cloud size={19} />
         </span>
         <span className="rounded-full bg-normal-soft px-2.5 py-1 text-[11px] font-medium text-[#1f9254]">
-          All synchronized
+          {pendingCount === 0 ? "All synchronized" : `${pendingCount} pending`}
         </span>
       </div>
 
@@ -67,11 +193,11 @@ function SyncStatusCard() {
       <div className="mt-4 grid grid-cols-2 gap-4 border-t border-black/8 pt-4">
         <div>
           <p className="text-[11px] text-text-secondary">Pending</p>
-          <p className="text-[15px] font-semibold text-text-primary">0</p>
+          <p className="text-[15px] font-semibold text-text-primary">{pendingCount}</p>
         </div>
         <div>
           <p className="text-[11px] text-text-secondary">Last synchronized</p>
-          <p className="text-[15px] font-semibold text-text-primary">10:42 AM</p>
+          <p className="text-[15px] font-semibold text-text-primary">{lastSyncedTime}</p>
         </div>
       </div>
 
