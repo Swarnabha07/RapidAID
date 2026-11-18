@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   LayoutGrid,
   ListChecks,
@@ -13,8 +14,10 @@ import {
   ShieldCheck,
   Menu,
   X,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/firebase/auth";
 
 const NAV_ITEMS = [
   { label: "Overview", icon: LayoutGrid },
@@ -28,6 +31,23 @@ const NAV_ITEMS = [
 
 export function DashboardSidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const { user, profile, signOutUser } = useAuth();
+  const router = useRouter();
+
+  const handleSignOut = async () => {
+    try {
+      setSigningOut(true);
+      await signOutUser();
+      router.push("/login");
+    } catch (err) {
+      console.error("Sign out error:", err);
+      setSigningOut(false);
+    }
+  };
+
+  const displayName =
+    profile?.displayName || user?.displayName || user?.email?.split("@")[0] || "Coordinator";
 
   return (
     <>
@@ -112,13 +132,23 @@ export function DashboardSidebar() {
             <Settings size={17} strokeWidth={1.75} />
             Settings
           </button>
+
+          <button
+            type="button"
+            onClick={handleSignOut}
+            disabled={signingOut}
+            className="mt-1 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[13.5px] text-text-inverse-muted transition-colors hover:bg-white/5 hover:text-critical disabled:opacity-50"
+          >
+            <LogOut size={17} strokeWidth={1.75} />
+            {signingOut ? "Signing out..." : "Sign Out"}
+          </button>
         </nav>
 
         <div className="border-t border-white/10 px-5 py-4">
           <div className="flex items-center gap-2 text-xs text-text-inverse-muted">
             <ShieldCheck size={15} className="text-normal" />
             <div>
-              <p className="font-medium text-white/80">Authorized access</p>
+              <p className="font-medium text-white/80">{displayName}</p>
               <p>Permissions verified by response backend</p>
             </div>
           </div>

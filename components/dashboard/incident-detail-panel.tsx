@@ -9,6 +9,8 @@ import { AssignTeamDialog } from "@/components/dashboard/dialogs/assign-team-dia
 import { EscalateDialog } from "@/components/dashboard/dialogs/escalate-dialog";
 import { ResolveDialog } from "@/components/dashboard/dialogs/resolve-dialog";
 import type { Incident } from "@/lib/types/incident";
+import { useAuth } from "@/lib/firebase/auth";
+import { acknowledgeReport } from "@/lib/firebase/firestore";
 
 export function IncidentDetailPanel({
   incident,
@@ -19,9 +21,21 @@ export function IncidentDetailPanel({
   onUpdate: (next: Partial<Incident>) => void;
   onDeselect?: () => void;
 }) {
+  const { user, profile } = useAuth();
+  const responderName = profile?.displayName || user?.displayName || "Dr. Maya Chen";
   const [dialog, setDialog] = useState<
     "ack" | "assign" | "escalate" | "resolve" | null
   >(null);
+
+  const handleMarkInProgress = async () => {
+    try {
+      await acknowledgeReport(incident.id, "Status marked as in-progress", responderName);
+    } catch (err) {
+      console.warn("mark in progress error:", err);
+    } finally {
+      onUpdate({ status: "In progress" });
+    }
+  };
 
   return (
     <div className="rounded-[var(--radius-md)] border border-white/10 bg-ink-raised p-4">
@@ -172,7 +186,7 @@ export function IncidentDetailPanel({
           variant="secondary"
           className="bg-transparent text-white border-white/15 hover:bg-white/5"
           disabled={incident.status === "In progress" || incident.status === "Resolved"}
-          onClick={() => onUpdate({ status: "In progress" })}
+          onClick={handleMarkInProgress}
         >
           Mark in progress
         </Button>

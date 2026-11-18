@@ -208,7 +208,9 @@ export function subscribeToMedicalQueue(
     orderBy("createdAt", "desc")
   );
 
-  return onSnapshot(
+  let activeUnsubscribe: Unsubscribe | null = null;
+
+  activeUnsubscribe = onSnapshot(
     q,
     (snapshot) => {
       const incidents = snapshot.docs.map((docSnap) => {
@@ -218,10 +220,47 @@ export function subscribeToMedicalQueue(
       callback(incidents);
     },
     (err) => {
-      console.error("subscribeToMedicalQueue listener error:", err);
-      if (onError) onError(err);
+      console.warn("subscribeToMedicalQueue indexed query warning, trying non-indexed listener:", err);
+      const fallbackQuery = query(
+        collection(db, "reports"),
+        where("assignedDashboard", "==", "medical")
+      );
+
+      activeUnsubscribe = onSnapshot(
+        fallbackQuery,
+        (snapshot) => {
+          const docs = snapshot.docs.map((docSnap) => ({
+            ...(docSnap.data() as Report),
+            reportId: docSnap.id,
+          }));
+          docs.sort((a, b) => {
+            const wDiff = (b.urgencyWeight || 1) - (a.urgencyWeight || 1);
+            if (wDiff !== 0) return wDiff;
+            const timeA = a.createdAt
+              ? typeof (a.createdAt as any).toDate === "function"
+                ? (a.createdAt as any).toDate().getTime()
+                : new Date(a.createdAt as any).getTime()
+              : 0;
+            const timeB = b.createdAt
+              ? typeof (b.createdAt as any).toDate === "function"
+                ? (b.createdAt as any).toDate().getTime()
+                : new Date(b.createdAt as any).getTime()
+              : 0;
+            return timeB - timeA;
+          });
+          callback(docs.map(mapReportToMedicalIncident));
+        },
+        (fallbackErr) => {
+          console.error("subscribeToMedicalQueue fallback failed:", fallbackErr);
+          if (onError) onError(fallbackErr);
+        }
+      );
     }
   );
+
+  return () => {
+    if (activeUnsubscribe) activeUnsubscribe();
+  };
 }
 
 /**
@@ -239,7 +278,9 @@ export function subscribeToRescueQueue(
     orderBy("createdAt", "desc")
   );
 
-  return onSnapshot(
+  let activeUnsubscribe: Unsubscribe | null = null;
+
+  activeUnsubscribe = onSnapshot(
     q,
     (snapshot) => {
       const incidents = snapshot.docs.map((docSnap) => {
@@ -249,10 +290,47 @@ export function subscribeToRescueQueue(
       callback(incidents);
     },
     (err) => {
-      console.error("subscribeToRescueQueue listener error:", err);
-      if (onError) onError(err);
+      console.warn("subscribeToRescueQueue indexed query warning, trying non-indexed listener:", err);
+      const fallbackQuery = query(
+        collection(db, "reports"),
+        where("assignedDashboard", "==", "rescue")
+      );
+
+      activeUnsubscribe = onSnapshot(
+        fallbackQuery,
+        (snapshot) => {
+          const docs = snapshot.docs.map((docSnap) => ({
+            ...(docSnap.data() as Report),
+            reportId: docSnap.id,
+          }));
+          docs.sort((a, b) => {
+            const wDiff = (b.urgencyWeight || 1) - (a.urgencyWeight || 1);
+            if (wDiff !== 0) return wDiff;
+            const timeA = a.createdAt
+              ? typeof (a.createdAt as any).toDate === "function"
+                ? (a.createdAt as any).toDate().getTime()
+                : new Date(a.createdAt as any).getTime()
+              : 0;
+            const timeB = b.createdAt
+              ? typeof (b.createdAt as any).toDate === "function"
+                ? (b.createdAt as any).toDate().getTime()
+                : new Date(b.createdAt as any).getTime()
+              : 0;
+            return timeB - timeA;
+          });
+          callback(docs.map(mapReportToRescueIncident));
+        },
+        (fallbackErr) => {
+          console.error("subscribeToRescueQueue fallback failed:", fallbackErr);
+          if (onError) onError(fallbackErr);
+        }
+      );
     }
   );
+
+  return () => {
+    if (activeUnsubscribe) activeUnsubscribe();
+  };
 }
 
 /**
@@ -328,6 +406,24 @@ export function subscribeToUserRequests(
 // Responder Dialog Action Helpers
 // ---------------------------------------------------------------------------
 
+async function patchReportFallback(reportId: string, updates: Record<string, any>): Promise<void> {
+  const { auth } = await import("@/lib/firebase/config");
+  const currentUser = auth.currentUser;
+  const token = currentUser ? await currentUser.getIdToken() : "";
+  const res = await fetch(`/api/reports/${encodeURIComponent(reportId)}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(updates),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.error || `Server update failed with HTTP ${res.status}`);
+  }
+}
+
 /**
  * Acknowledges an incident from the AcknowledgeDialog.
  * Stops the overdue countdown and records responder attribution.
@@ -337,20 +433,30 @@ export async function acknowledgeReport(
   note?: string,
   responderName: string = "Verified Coordinator"
 ): Promise<void> {
-  const ref = doc(db, "reports", reportId);
   const record = createActivityRecord(
     "Incident acknowledged",
     responderName,
     note || "Acknowledgement confirmed by coordinator"
   );
 
-  await updateDoc(ref, {
-    acknowledgedAt: serverTimestamp(),
-    acknowledgedBy: responderName,
-    status: "in_progress",
-    updatedAt: serverTimestamp(),
-    activityTrail: arrayUnion(record),
-  });
+  try {
+    const ref = doc(db, "reports", reportId);
+    await updateDoc(ref, {
+      acknowledgedAt: serverTimestamp(),
+      acknowledgedBy: responderName,
+      status: "in_progress",
+      updatedAt: serverTimestamp(),
+      activityTrail: arrayUnion(record),
+    });
+  } catch (err) {
+    console.warn("Direct acknowledgeReport error, attempting PATCH fallback:", err);
+    await patchReportFallback(reportId, {
+      acknowledgedAt: true,
+      status: "in_progress",
+      action: "Incident acknowledged",
+      activityNote: note || "Acknowledgement confirmed by coordinator",
+    });
+  }
 }
 
 /**
@@ -362,19 +468,29 @@ export async function assignResponderUnit(
   note?: string,
   responderName: string = "Duty Coordinator"
 ): Promise<void> {
-  const ref = doc(db, "reports", reportId);
   const record = createActivityRecord(
     `Unit assigned: ${unitName}`,
     responderName,
     note || `Assigned to ${unitName}`
   );
 
-  await updateDoc(ref, {
-    assignedTeamOrUnit: unitName,
-    status: "dispatched",
-    updatedAt: serverTimestamp(),
-    activityTrail: arrayUnion(record),
-  });
+  try {
+    const ref = doc(db, "reports", reportId);
+    await updateDoc(ref, {
+      assignedTeamOrUnit: unitName,
+      status: "dispatched",
+      updatedAt: serverTimestamp(),
+      activityTrail: arrayUnion(record),
+    });
+  } catch (err) {
+    console.warn("Direct assignResponderUnit error, attempting PATCH fallback:", err);
+    await patchReportFallback(reportId, {
+      assignedTeamOrUnit: unitName,
+      status: "dispatched",
+      action: `Unit assigned: ${unitName}`,
+      activityNote: note || `Assigned to ${unitName}`,
+    });
+  }
 }
 
 /**
@@ -386,7 +502,6 @@ export async function escalateReportManual(
   reason: string,
   responderName: string = "Authorized Coordinator"
 ): Promise<void> {
-  const ref = doc(db, "reports", reportId);
   const weight = getUrgencyWeight(urgency);
   const record = createActivityRecord(
     `Escalated to ${urgency.toUpperCase()}`,
@@ -394,14 +509,29 @@ export async function escalateReportManual(
     reason
   );
 
-  await updateDoc(ref, {
-    escalated: true,
-    escalatedAt: serverTimestamp(),
-    urgency,
-    urgencyWeight: weight,
-    updatedAt: serverTimestamp(),
-    activityTrail: arrayUnion(record),
-  });
+  try {
+    const ref = doc(db, "reports", reportId);
+    await updateDoc(ref, {
+      escalated: true,
+      escalatedAt: serverTimestamp(),
+      urgency,
+      urgencyWeight: weight,
+      updatedAt: serverTimestamp(),
+      activityTrail: arrayUnion(record),
+    });
+  } catch (err) {
+    console.warn("Direct escalateReportManual error, attempting PATCH fallback:", err);
+    await patchReportFallback(reportId, {
+      escalated: true,
+      urgency,
+      urgencyWeight: weight,
+      escalationReason: reason,
+      previousUrgency: "normal",
+      newUrgency: urgency,
+      action: `Escalated to ${urgency.toUpperCase()}`,
+      activityNote: reason,
+    });
+  }
 }
 
 /**
@@ -413,17 +543,27 @@ export async function resolveReport(
   resolutionNote: string,
   responderName: string = "Verified Lead"
 ): Promise<void> {
-  const ref = doc(db, "reports", reportId);
   const record = createActivityRecord(
     "Incident resolved",
     responderName,
     resolutionNote
   );
 
-  await updateDoc(ref, {
-    status: "resolved",
-    resolvedNotes: resolutionNote,
-    updatedAt: serverTimestamp(),
-    activityTrail: arrayUnion(record),
-  });
+  try {
+    const ref = doc(db, "reports", reportId);
+    await updateDoc(ref, {
+      status: "resolved",
+      resolvedNotes: resolutionNote,
+      updatedAt: serverTimestamp(),
+      activityTrail: arrayUnion(record),
+    });
+  } catch (err) {
+    console.warn("Direct resolveReport error, attempting PATCH fallback:", err);
+    await patchReportFallback(reportId, {
+      status: "resolved",
+      resolvedNotes: resolutionNote,
+      action: "Incident resolved",
+      activityNote: resolutionNote,
+    });
+  }
 }

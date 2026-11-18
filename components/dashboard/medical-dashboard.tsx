@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { DashboardSidebar } from "@/components/dashboard/sidebar";
 import { DashboardHeader } from "@/components/dashboard/dashboard-header";
 import { OperationsOverview } from "@/components/dashboard/operations-overview";
@@ -10,10 +10,36 @@ import { EscalationWatch } from "@/components/dashboard/escalation-watch";
 import { ActivityTrail } from "@/components/dashboard/activity-trail";
 import { IncidentDetailPanel } from "@/components/dashboard/incident-detail-panel";
 import { INCIDENTS, type Incident } from "@/lib/types/incident";
+import { subscribeToMedicalQueue } from "@/lib/firebase/firestore";
 
 export function MedicalDashboard() {
   const [incidents, setIncidents] = useState<Incident[]>(INCIDENTS);
   const [selectedId, setSelectedId] = useState<string>(INCIDENTS[0].id);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToMedicalQueue(
+      (liveIncidents) => {
+        if (liveIncidents && liveIncidents.length > 0) {
+          setIncidents(liveIncidents);
+          setSelectedId((prev) => {
+            if (prev && liveIncidents.some((i) => i.id === prev)) {
+              return prev;
+            }
+            return liveIncidents[0].id;
+          });
+        } else {
+          // Fallback to initial mock data if queue in Firestore is empty
+          setIncidents(INCIDENTS);
+          setSelectedId((prev) => prev || INCIDENTS[0].id);
+        }
+      },
+      (err) => {
+        console.warn("subscribeToMedicalQueue listener warning:", err);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
 
   const selected = incidents.find((i) => i.id === selectedId) ?? incidents[0];
 

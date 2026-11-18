@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Check } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import type { RescueIncident } from "@/lib/types/rescue";
+import { useAuth } from "@/lib/firebase/auth";
+import { resolveReport } from "@/lib/firebase/firestore";
 
 export function ResolveDialog({
   incident,
@@ -17,9 +19,27 @@ export function ResolveDialog({
   onClose: () => void;
   onConfirm: (note: string) => void;
 }) {
+  const { user, profile } = useAuth();
+  const [submitting, setSubmitting] = useState(false);
   const [note, setNote] = useState(
     "All reported people accounted for. Scene handover confirmed with duty coordinator."
   );
+
+  const responderName =
+    profile?.displayName || user?.displayName || "M. Chen";
+
+  const handleConfirm = async () => {
+    if (!note.trim()) return;
+    setSubmitting(true);
+    try {
+      await resolveReport(incident.id, note.trim(), responderName);
+    } catch (err) {
+      console.warn("resolveReport error in rescue dialog:", err);
+    } finally {
+      setSubmitting(false);
+      onConfirm(note.trim());
+    }
+  };
 
   return (
     <Modal open={open} onClose={onClose} labelledBy="resolve-title">
@@ -54,7 +74,7 @@ export function ResolveDialog({
       />
 
       <p className="mt-4 text-[12.5px] text-text-inverse-muted">
-        Recorded as M. Chen · Authorized coordinator
+        Recorded as {responderName} · Authorized coordinator
       </p>
 
       <div className="mt-6 flex gap-3">
@@ -62,11 +82,13 @@ export function ResolveDialog({
           variant="secondary"
           className="flex-1 bg-transparent text-white border-white/15 hover:bg-white/5"
           onClick={onClose}
+          disabled={submitting}
         >
           Cancel
         </Button>
-        <Button className="flex-1" onClick={() => onConfirm(note)}>
-          Confirm resolution
+        <Button className="flex-1" onClick={handleConfirm} disabled={!note.trim() || submitting}>
+          {submitting && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+          {submitting ? "Resolving..." : "Confirm resolution"}
         </Button>
       </div>
 

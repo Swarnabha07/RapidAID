@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Check } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import type { RescueIncident, RescueTeam } from "@/lib/types/rescue";
+import { useAuth } from "@/lib/firebase/auth";
+import { assignResponderUnit } from "@/lib/firebase/firestore";
 
 export function AssignUnitDialog({
   incident,
@@ -19,11 +21,28 @@ export function AssignUnitDialog({
   onClose: () => void;
   onConfirm: (unitId: string) => void;
 }) {
+  const { user, profile } = useAuth();
+  const [submitting, setSubmitting] = useState(false);
   const [note, setNote] = useState(
     "Readiness reviewed with the unit lead. West service lane access requires field verification."
   );
 
+  const responderName =
+    profile?.displayName || user?.displayName || "M. Chen";
+
   if (!team) return null;
+
+  const handleConfirm = async () => {
+    setSubmitting(true);
+    try {
+      await assignResponderUnit(incident.id, team.id, note, responderName);
+    } catch (err) {
+      console.warn("assignResponderUnit error in rescue dialog:", err);
+    } finally {
+      setSubmitting(false);
+      onConfirm(team.id);
+    }
+  };
 
   return (
     <Modal open={open} onClose={onClose} labelledBy="assign-unit-title">
@@ -59,7 +78,7 @@ export function AssignUnitDialog({
       />
 
       <p className="mt-4 text-[12.5px] text-text-inverse-muted">
-        Recorded as M. Chen · Authorized coordinator
+        Recorded as {responderName} · Authorized coordinator
       </p>
 
       <div className="mt-6 flex gap-3">
@@ -67,11 +86,13 @@ export function AssignUnitDialog({
           variant="secondary"
           className="flex-1 bg-transparent text-white border-white/15 hover:bg-white/5"
           onClick={onClose}
+          disabled={submitting}
         >
           Cancel
         </Button>
-        <Button className="flex-1" onClick={() => onConfirm(team.id)}>
-          Confirm assignment
+        <Button className="flex-1" onClick={handleConfirm} disabled={submitting}>
+          {submitting && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+          {submitting ? "Assigning unit..." : "Confirm assignment"}
         </Button>
       </div>
 

@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Search } from "lucide-react";
+import { Check, Search, Loader2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { MEDICAL_TEAMS, type Incident } from "@/lib/types/incident";
+import { useAuth } from "@/lib/firebase/auth";
+import { assignResponderUnit } from "@/lib/firebase/firestore";
 
 export function AssignTeamDialog({
   incident,
@@ -18,9 +20,39 @@ export function AssignTeamDialog({
   onClose: () => void;
   onConfirm: (teamName: string) => void;
 }) {
+  const { user, profile } = useAuth();
   const [selected, setSelected] = useState(MEDICAL_TEAMS[0].id);
-  const available = MEDICAL_TEAMS.filter((t) => t.availability === "Available").length;
-  const team = MEDICAL_TEAMS.find((t) => t.id === selected)!;
+  const [search, setSearch] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const responderName =
+    profile?.displayName || user?.displayName || "Dr. Maya Chen";
+
+  const filteredTeams = MEDICAL_TEAMS.filter(
+    (t) =>
+      t.name.toLowerCase().includes(search.toLowerCase()) ||
+      t.capability.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const available = filteredTeams.filter((t) => t.availability === "Available").length;
+  const team = MEDICAL_TEAMS.find((t) => t.id === selected) || MEDICAL_TEAMS[0];
+
+  const handleConfirm = async () => {
+    setSubmitting(true);
+    try {
+      await assignResponderUnit(
+        incident.id,
+        team.name,
+        `Assigned ${team.name} (${team.capability}) to incident ${incident.id}`,
+        responderName
+      );
+    } catch (err) {
+      console.warn("assignResponderUnit error:", err);
+    } finally {
+      setSubmitting(false);
+      onConfirm(team.name);
+    }
+  };
 
   return (
     <Modal open={open} onClose={onClose} labelledBy="assign-title">
@@ -56,6 +88,8 @@ export function AssignTeamDialog({
         <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-inverse-muted" />
         <input
           type="text"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
           placeholder="Search team name or capability..."
           className="h-10 w-full rounded-md border border-white/10 bg-ink pl-9 pr-3 text-sm text-white placeholder:text-text-inverse-muted/70 focus:outline-none focus:ring-1 focus:ring-brand-blue"
         />
@@ -63,11 +97,11 @@ export function AssignTeamDialog({
 
       <div className="mt-4 flex items-center justify-between text-[11px] uppercase tracking-wide text-text-inverse-muted/70">
         <span>Available teams</span>
-        <span>{available} available · {MEDICAL_TEAMS.length} total</span>
+        <span>{available} available · {filteredTeams.length} total</span>
       </div>
 
-      <div className="mt-2 space-y-2">
-        {MEDICAL_TEAMS.map((t) => (
+      <div className="mt-2 max-h-64 space-y-2 overflow-y-auto pr-1">
+        {filteredTeams.map((t) => (
           <button
             key={t.id}
             type="button"
@@ -118,7 +152,7 @@ export function AssignTeamDialog({
           Assign {team.name} to {incident.id}
         </p>
         <p className="mt-0.5 text-[12.5px] text-text-inverse-muted">
-          Your authorization is checked again before saving.
+          Your authorization as {responderName} is checked before saving.
         </p>
       </div>
 
@@ -127,10 +161,18 @@ export function AssignTeamDialog({
       </p>
 
       <div className="mt-6 flex justify-end gap-3">
-        <Button variant="secondary" className="bg-transparent text-white border-white/15 hover:bg-white/5" onClick={onClose}>
+        <Button
+          variant="secondary"
+          className="bg-transparent text-white border-white/15 hover:bg-white/5"
+          onClick={onClose}
+          disabled={submitting}
+        >
           Cancel
         </Button>
-        <Button onClick={() => onConfirm(team.name)}>Confirm assignment</Button>
+        <Button onClick={handleConfirm} disabled={submitting}>
+          {submitting && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+          {submitting ? "Assigning team..." : "Confirm assignment"}
+        </Button>
       </div>
     </Modal>
   );
