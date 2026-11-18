@@ -1,14 +1,48 @@
+"use client";
+
+import { useEffect, useState } from "react";
 import { Info } from "lucide-react";
-import { CITIZEN_REQUESTS } from "@/lib/types/citizen-request";
+import { CITIZEN_REQUESTS, type CitizenRequest } from "@/lib/types/citizen-request";
+import { useAuth } from "@/lib/firebase/auth";
+import { subscribeToUserRequests } from "@/lib/firebase/firestore";
 import {
   RequestUrgencyPill,
   SyncPill,
   OperationalStatusPill,
 } from "@/components/citizen/request-status-pills";
 
-export function RequestHistorySection() {
+export interface RequestHistorySectionProps {
+  requests?: CitizenRequest[];
+}
+
+export function RequestHistorySection({ requests: propRequests }: RequestHistorySectionProps) {
+  const { user } = useAuth();
+  const [internalRequests, setInternalRequests] = useState<CitizenRequest[]>([]);
+
+  useEffect(() => {
+    if (propRequests !== undefined) return;
+    if (!user?.uid) return;
+
+    const unsubscribe = subscribeToUserRequests(
+      user.uid,
+      (data) => {
+        setInternalRequests(data);
+      },
+      (err) => {
+        console.warn("subscribeToUserRequests error in RequestHistorySection:", err);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [user?.uid, propRequests]);
+
+  const sourceRequests = propRequests !== undefined ? propRequests : internalRequests;
+  // Seamless fallback to static demo requests if user has no submitted reports yet
+  const displayRequests = sourceRequests.length > 0 ? sourceRequests : CITIZEN_REQUESTS;
+  const isDemoFallback = sourceRequests.length === 0;
+
   return (
-    <section>
+    <section id="request-history">
       <div className="flex items-end justify-between">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wide text-text-secondary">
@@ -18,13 +52,20 @@ export function RequestHistorySection() {
             My emergency requests
           </h2>
         </div>
-        <a href="#" className="text-[13.5px] font-medium text-brand-blue hover:underline">
-          View all
-        </a>
+        <div className="flex items-center gap-2">
+          {isDemoFallback && (
+            <span className="rounded bg-black/5 px-2 py-0.5 text-[11px] font-medium text-text-secondary">
+              Demo sample
+            </span>
+          )}
+          <a href="#" className="text-[13.5px] font-medium text-brand-blue hover:underline">
+            View all
+          </a>
+        </div>
       </div>
 
       <div className="mt-5 space-y-3">
-        {CITIZEN_REQUESTS.map((req) => (
+        {displayRequests.map((req) => (
           <div
             key={req.id}
             className="rounded-[var(--radius-md)] border border-black/8 bg-white p-5"

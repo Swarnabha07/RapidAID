@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RescueSidebar } from "@/components/rescue/rescue-sidebar";
 import { RescueHeader } from "@/components/rescue/rescue-header";
 import { RoleViewTabs } from "@/components/rescue/role-view-tabs";
@@ -12,6 +12,7 @@ import { TeamAllocation } from "@/components/rescue/team-allocation";
 import { AcknowledgementWatch } from "@/components/rescue/acknowledgement-watch";
 import { OperationalActivity } from "@/components/rescue/operational-activity";
 import { ROLE_VIEWS, type RescueIncident, type RoleViewConfig } from "@/lib/types/rescue";
+import { subscribeToRescueQueue } from "@/lib/firebase/firestore";
 
 export function RescueDashboard() {
   const [roleKey, setRoleKey] = useState<RoleViewConfig["key"]>("rescue");
@@ -19,6 +20,30 @@ export function RescueDashboard() {
     Object.fromEntries(ROLE_VIEWS.map((v) => [v.key, v.incidents]))
   );
   const [selectedId, setSelectedId] = useState<string>(ROLE_VIEWS[0].incidents[0].id);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToRescueQueue(
+      (liveIncidents) => {
+        if (liveIncidents && liveIncidents.length > 0) {
+          setIncidentsByRole((prev) => ({
+            ...prev,
+            rescue: liveIncidents,
+          }));
+          setSelectedId((prev) => {
+            if (prev && liveIncidents.some((i) => i.id === prev)) {
+              return prev;
+            }
+            return liveIncidents[0].id;
+          });
+        }
+      },
+      (err) => {
+        console.warn("subscribeToRescueQueue listener warning:", err);
+      }
+    );
+
+    return () => unsubscribe();
+  }, []);
 
   const baseView = ROLE_VIEWS.find((v) => v.key === roleKey)!;
   const view: RoleViewConfig = { ...baseView, incidents: incidentsByRole[roleKey] };
@@ -52,7 +77,7 @@ export function RescueDashboard() {
             <div>
               <h1 className="text-2xl font-semibold text-white">{view.pageTitle}</h1>
               <p className="mt-0.5 text-[13px] text-text-inverse-muted">
-                {view.pageSubtitle} · 16 Nov 2026, 14:32 UTC
+                {view.pageSubtitle} · Synchronized live
               </p>
             </div>
             <RoleViewTabs activeKey={roleKey} onChange={handleRoleChange} />

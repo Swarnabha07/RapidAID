@@ -7,6 +7,8 @@ import { AssignUnitDialog } from "@/components/rescue/dialogs/assign-unit-dialog
 import { EscalateDialog } from "@/components/rescue/dialogs/escalate-dialog";
 import { ResolveDialog } from "@/components/rescue/dialogs/resolve-dialog";
 import type { RescueIncident, RoleViewConfig } from "@/lib/types/rescue";
+import { useAuth } from "@/lib/firebase/auth";
+import { acknowledgeReport } from "@/lib/firebase/firestore";
 
 const URGENCY_CLASS: Record<string, string> = {
   Critical: "text-[#ff8a8d]",
@@ -23,8 +25,30 @@ export function IncidentWorkspace({
   incident: RescueIncident;
   onUpdate: (patch: Partial<RescueIncident>) => void;
 }) {
+  const { user, profile } = useAuth();
+  const responderName = profile?.displayName || user?.displayName || "M. Chen";
   const [dialog, setDialog] = useState<"assign" | "escalate" | "resolve" | null>(null);
   const availableTeam = view.teams.find((t) => t.availability === "Available") ?? null;
+
+  const handleAcknowledge = async () => {
+    try {
+      await acknowledgeReport(incident.id, "Acknowledged by rescue coordinator", responderName);
+    } catch (err) {
+      console.warn("acknowledgeReport error:", err);
+    } finally {
+      onUpdate({ acknowledgedBy: responderName, status: "Acknowledged" });
+    }
+  };
+
+  const handleMarkInProgress = async () => {
+    try {
+      await acknowledgeReport(incident.id, "Status marked as in-progress", responderName);
+    } catch (err) {
+      console.warn("mark in progress error:", err);
+    } finally {
+      onUpdate({ status: "In progress" });
+    }
+  };
 
   return (
     <div className="rounded-[var(--radius-md)] border border-white/10 bg-ink-raised p-4">
@@ -97,7 +121,7 @@ export function IncidentWorkspace({
         {!incident.acknowledgedBy ? (
           <Button
             className="w-full"
-            onClick={() => onUpdate({ acknowledgedBy: "M. Chen", status: "Acknowledged" })}
+            onClick={handleAcknowledge}
           >
             Acknowledge incident
           </Button>
@@ -110,7 +134,7 @@ export function IncidentWorkspace({
               variant="secondary"
               className="flex-1 bg-transparent text-white border-white/15 hover:bg-white/5"
               disabled={incident.status === "In progress" || incident.status === "Resolved"}
-              onClick={() => onUpdate({ status: "In progress" })}
+              onClick={handleMarkInProgress}
             >
               Mark in progress
             </Button>

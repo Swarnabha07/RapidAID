@@ -1,9 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import { Loader2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import type { RescueIncident } from "@/lib/types/rescue";
+import { useAuth } from "@/lib/firebase/auth";
+import { escalateReportManual } from "@/lib/firebase/firestore";
 
 export function EscalateDialog({
   incident,
@@ -16,10 +19,32 @@ export function EscalateDialog({
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const { user, profile } = useAuth();
+  const [submitting, setSubmitting] = useState(false);
   const [reason, setReason] = useState(
     "Potential entrapment. Requesting cross-team coordination and review of access conditions."
   );
   const [authorized, setAuthorized] = useState(true);
+
+  const responderName =
+    profile?.displayName || user?.displayName || "M. Chen";
+
+  const handleConfirm = async () => {
+    setSubmitting(true);
+    try {
+      await escalateReportManual(
+        incident.id,
+        "critical",
+        reason,
+        responderName
+      );
+    } catch (err) {
+      console.warn("escalateReportManual error in rescue dialog:", err);
+    } finally {
+      setSubmitting(false);
+      onConfirm();
+    }
+  };
 
   return (
     <Modal open={open} onClose={onClose} labelledBy="escalate-title">
@@ -35,7 +60,7 @@ export function EscalateDialog({
       </p>
 
       <div className="mt-5 space-y-3 border-t border-white/10 pt-4 text-[13.5px]">
-        <Row label="Confirmed priority" value={`${incident.confirmedPriority} · M. Chen`} tone="text-[#ff8a8d]" />
+        <Row label="Confirmed priority" value={`${incident.confirmedPriority} · ${responderName}`} tone="text-[#ff8a8d]" />
         <Row label="Current level" value="L1 · Duty coordinator" />
         <Row label="Escalate to" value="L2 · Central coordination" />
       </div>
@@ -61,7 +86,7 @@ export function EscalateDialog({
       </label>
 
       <p className="mt-4 text-[12.5px] text-text-inverse-muted">
-        Your identity, reason and timestamp will be recorded.
+        Recorded as {responderName} · Authorized coordinator
       </p>
 
       <div className="mt-6 flex gap-3">
@@ -69,11 +94,17 @@ export function EscalateDialog({
           variant="secondary"
           className="flex-1 bg-transparent text-white border-white/15 hover:bg-white/5"
           onClick={onClose}
+          disabled={submitting}
         >
           Cancel
         </Button>
-        <Button className="flex-1" disabled={!authorized || !reason.trim()} onClick={onConfirm}>
-          Confirm escalation
+        <Button
+          className="flex-1"
+          disabled={!authorized || !reason.trim() || submitting}
+          onClick={handleConfirm}
+        >
+          {submitting && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+          {submitting ? "Escalating..." : "Confirm escalation"}
         </Button>
       </div>
 

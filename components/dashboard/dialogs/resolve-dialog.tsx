@@ -1,10 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Check } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import type { Incident } from "@/lib/types/incident";
+import { useAuth } from "@/lib/firebase/auth";
+import { resolveReport } from "@/lib/firebase/firestore";
 
 export function ResolveDialog({
   incident,
@@ -17,7 +19,25 @@ export function ResolveDialog({
   onClose: () => void;
   onConfirm: (note: string) => void;
 }) {
+  const { user, profile } = useAuth();
   const [note, setNote] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const responderName =
+    profile?.displayName || user?.displayName || "Dr. Maya Chen";
+
+  const handleConfirm = async () => {
+    if (!note.trim()) return;
+    setSubmitting(true);
+    try {
+      await resolveReport(incident.id, note.trim(), responderName);
+    } catch (err) {
+      console.warn("resolveReport error:", err);
+    } finally {
+      setSubmitting(false);
+      onConfirm(note.trim());
+    }
+  };
 
   return (
     <Modal open={open} onClose={onClose} labelledBy="resolve-title">
@@ -52,15 +72,21 @@ export function ResolveDialog({
       </p>
 
       <div className="mt-5 flex items-center gap-2 rounded-md bg-normal-soft px-3 py-2.5 text-sm text-[#5fd996]">
-        <Check size={15} /> Dr. Maya Chen · verified coordinator
+        <Check size={15} /> {responderName} · verified coordinator
       </div>
 
       <div className="mt-6 flex justify-end gap-3">
-        <Button variant="secondary" className="bg-transparent text-white border-white/15 hover:bg-white/5" onClick={onClose}>
+        <Button
+          variant="secondary"
+          className="bg-transparent text-white border-white/15 hover:bg-white/5"
+          onClick={onClose}
+          disabled={submitting}
+        >
           Cancel
         </Button>
-        <Button disabled={!note.trim()} onClick={() => onConfirm(note)}>
-          Resolve incident
+        <Button disabled={!note.trim() || submitting} onClick={handleConfirm}>
+          {submitting && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+          {submitting ? "Resolving..." : "Resolve incident"}
         </Button>
       </div>
     </Modal>
