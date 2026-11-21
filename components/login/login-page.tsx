@@ -25,7 +25,7 @@ export function LoginPage() {
   // If user is already authenticated and not expired, display signed-in panel
   useEffect(() => {
     if (!loading && user && !sessionExpired) {
-      const activeRole = role || profile?.role || "victim";
+      const activeRole = role || "victim";
       setView({
         name: "signed-in",
         name_: user.displayName || profile?.displayName || user.email?.split("@")[0] || "User",

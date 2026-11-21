@@ -301,6 +301,25 @@ For browser-based Gemini Nano integration, verify Chrome's built-in AI availabil
 
 ---
 
+### 🔐 Roles and access control
+
+- Every new account starts as **citizen (`victim`)**. The browser can never choose or change a role.
+- **Medical, rescue and admin** roles are granted only by a trusted administrator, locally, with the Firebase Admin SDK:
+
+  ```bash
+  # needs a service-account JSON file (never commit it)
+  GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account.json \
+    node scripts/set-role.mjs --email responder@example.org --role medical
+
+  node scripts/set-role.mjs --list   # review every elevated account
+  ```
+
+- The role lives in a signed **custom claim** on the user's ID token. Firestore Security Rules and the server API routes trust that claim only, never the editable `users/{uid}` document. After a role change the user must sign in again.
+- Citizens create reports directly in Firestore (so offline persistence works), but only in the initial `received` state. **All responder actions** (acknowledge, assign, escalate, resolve) go through authenticated Next.js server routes that check the role, the dashboard, and the allowed status transition.
+- Deploy the rules after pulling changes: `firebase deploy --only firestore:rules`.
+
+---
+
 ## 🧯 Scope & Responsible Use
 
 RapidAID is designed as an **emergency information routing and coordination platform for human responders**.

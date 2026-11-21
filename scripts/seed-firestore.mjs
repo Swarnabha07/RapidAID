@@ -34,6 +34,25 @@ if (!API_KEY) {
   process.exit(1);
 }
 
+// ---------------------------------------------------------------------------
+// SAFETY GUARD - this script creates test accounts (including an admin) and OVERWRITES
+// reports/users documents. Run it ONLY against a separate development project, never production.
+// No passwords are stored in this repository: supply your own through the environment.
+//   SEED_TEST_PASSWORD   a strong password (14+ characters) used for the test accounts
+//   SEED_CONFIRM_PROJECT must equal the project id you are about to seed
+// ---------------------------------------------------------------------------
+const SEED_PASSWORD = process.env.SEED_TEST_PASSWORD;
+if (!SEED_PASSWORD || SEED_PASSWORD.length < 14) {
+  console.error("Set SEED_TEST_PASSWORD to a strong password (at least 14 characters). Nothing was changed.");
+  process.exit(1);
+}
+if (process.env.SEED_CONFIRM_PROJECT !== PROJECT_ID) {
+  console.error(
+    `Safety check failed: set SEED_CONFIRM_PROJECT=${PROJECT_ID} to confirm this is a DEVELOPMENT project. Nothing was changed.`
+  );
+  process.exit(1);
+}
+
 // Read OAuth access token from firebase-tools.json
 const configPath = path.join(
   process.env.USERPROFILE || process.env.HOME || "",
@@ -241,25 +260,25 @@ async function runSeed() {
   const testUsers = [
     {
       email: "victim@rapidaid.test",
-      password: "RapidAid123!",
+      password: SEED_PASSWORD,
       displayName: "Citizen User",
       role: "victim",
     },
     {
       email: "medic@rapidaid.test",
-      password: "RapidAid123!",
+      password: SEED_PASSWORD,
       displayName: "Dr. Elena Rostova",
       role: "medical",
     },
     {
       email: "rescue@rapidaid.test",
-      password: "RapidAid123!",
+      password: SEED_PASSWORD,
       displayName: "Captain Marcus Cole",
       role: "rescue",
     },
     {
       email: "admin@rapidaid.test",
-      password: "RapidAid123!",
+      password: SEED_PASSWORD,
       displayName: "Disaster Operations Lead",
       role: "admin",
     },

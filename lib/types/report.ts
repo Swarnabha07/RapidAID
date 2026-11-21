@@ -49,6 +49,9 @@ export interface ReportActivityEntry {
   id: string;
   action: string;
   actorRole: string;
+  /** Set by the server for responder actions (trusted, from the verified token). */
+  actorUid?: string;
+  actorName?: string;
   note?: string | null;
   timestamp: Timestamp | string | number | Date;
 }
@@ -85,6 +88,7 @@ export interface Report {
 
   // Optional triage & coordination enrichment fields
   acknowledgedBy?: string | null;
+  acknowledgedByUid?: string | null;
   peopleAffected?: number;
   reportedInjuries?: string | null;
   aiTriageSummary?: string | null;

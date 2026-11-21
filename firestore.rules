@@ -4,84 +4,125 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // ===============================================================
-    // Assumed Data Model
+    // SECURITY MODEL
     // ===============================================================
-    //
-    // Collection: users
-    // Document ID: {userId} (Firebase Auth UID)
-    // Fields:
-    //   - role: string (allowed: 'medical', 'rescue', 'admin', 'citizen')
-    //   - name: string (optional)
-    //   - email: string (optional)
-    //   - createdAt: timestamp (optional)
-    //
-    // Collection: reports
-    // Document ID: {reportId}
-    // Fields:
-    //   - reportId: string
-    //   - userId: string (required, creator's Auth UID)
-    //   - category: string ('medical' | 'water' | 'shelter' | 'missing_person' | 'other')
-    //   - urgency: string ('critical' | 'high' | 'normal')
-    //   - description: string
-    //   - location: map (lat: number, lng: number)
-    //   - status: string ('received' | 'in_progress' | 'dispatched' | 'resolved')
-    //   - assignedDashboard: string ('medical' | 'rescue')
-    //   - createdAt: timestamp
-    //   - updatedAt: timestamp
-    //
-    // Collection: alerts
-    // Document ID: {alertId}
-    // Fields:
-    //   - alertId: string
-    //   - title: string
-    //   - message: string
-    //   - severity: string ('info' | 'warning' | 'critical')
-    //   - area: string
-    //   - createdBy: string
-    //   - createdAt: timestamp
-    //   - expiresAt: timestamp
-    //
-    // Collection: resources
-    // Document ID: {resourceId}
-    // Fields:
-    //   - resourceId: string
-    //   - dashboard: string ('medical' | 'rescue')
-    //   - type: string
-    //   - quantityAvailable: number
-    //   - location: string | map
-    //   - updatedAt: timestamp
-    //
-    // Collection: escalationLog
-    // Document ID: {logId}
-    // Fields:
-    //   - incidentId: string
-    //   - escalatedAt: timestamp
-    //   - escalationLevel: number
-    //   - reason: string
-    //
-    // ===============================================================
+    // - The user's role is read ONLY from the signed custom claim in the ID token
+    //   (request.auth.token.role). It is set by the server or by `scripts/set-role.mjs`
+    //   (Firebase Admin SDK). The users/{uid} document is NEVER used for authorization,
+    //   because users can edit parts of it.
+    // - Citizens create their own reports directly (this keeps offline persistence working),
+    //   but only in the exact initial state "received". Every later change to a report
+    //   (acknowledge, assign, escalate, resolve, dedupe...) is written by the Next.js server
+    //   routes with the Admin SDK, which bypasses these rules. Clients cannot update reports.
+    // - alerts, resources and escalationLog are written by the server only.
 
     // ===============================================================
     // Helper Functions
     // ===============================================================
 
-    // Check if the user is authenticated
     function isSignedIn() {
       return request.auth != null;
     }
 
-    // Retrieve user role from auth token claim, or fallback safely to users doc
-    function getUserRole() {
-      return isSignedIn() && ('role' in request.auth.token && request.auth.token.role != null)
-        ? request.auth.token.role
-        : (isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && ('role' in get(/databases/$(database)/documents/users/$(request.auth.uid)).data)
-            ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role
-            : null);
+    function claimRole() {
+      return request.auth.token.get('role', '');
     }
 
-    // Check if user has responder privileges (medical, rescue, admin)
     function isResponder() {
-      return getUserRole() in ["medical", "rescue", "admin"];
+      return isSignedIn() && claimRole() in ['medical', 'rescue', 'admin'];
+    }
+
+    function isAdmin() {
+      return isSignedIn() && claimRole() == 'admin';
+    }
+
+    // ---- users/{uid}: the only fields a user may change on their own document ----
+    function isValidProfileUpdate() {
+      let d = request.resource.data;
+      let changed = d.diff(resource.data).affectedKeys();
+      return changed.hasOnly(['displayName', 'preferredLanguage', 'fcmToken', 'lastActiveAt'])
+        && (!changed.hasAny(['displayName'])
+            || (d.displayName is string && d.displayName.size() <= 100))
+        && (!changed.hasAny(['preferredLanguage'])
+            || (d.preferredLanguage is string && d.preferredLanguage.size() <= 16))
+        && (!changed.hasAny(['fcmToken'])
+            || d.fcmToken == null
+            || (d.fcmToken is string && d.fcmToken.size() <= 4096))
+        && (!changed.hasAny(['lastActiveAt']) || d.lastActiveAt == request.time);
+    }
+
+    // ---- reports: validation of a citizen-created report ----
+    function isValidLocation(loc) {
+      return loc is map
+        && loc.keys().hasOnly(['lat', 'lng', 'address', 'zone'])
+        && loc.keys().hasAll(['lat', 'lng'])
+        && loc.lat is number && loc.lat >= -90 && loc.lat <= 90
+        && loc.lng is number && loc.lng >= -180 && loc.lng <= 180
+        && (!('address' in loc) || (loc.address is string && loc.address.size() <= 300))
+        && (!('zone' in loc) || (loc.zone is string && loc.zone.size() <= 100));
+    }
+
+    function isValidInitialTrail(trail) {
+      return trail is list
+        && trail.size() == 1
+        && trail[0] is map
+        && trail[0].keys().hasOnly(['id', 'action', 'actorRole', 'note', 'timestamp'])
+        && trail[0].keys().hasAll(['id', 'action', 'actorRole', 'note', 'timestamp'])
+        && trail[0].id is string && trail[0].id.size() <= 64
+        && trail[0].action is string && trail[0].action.size() <= 200
+        && trail[0].actorRole in ['citizen', 'victim']
+        && (trail[0].note == null || (trail[0].note is string && trail[0].note.size() <= 300))
+        && trail[0].timestamp is string && trail[0].timestamp.size() <= 40;
+    }
+
+    function isValidNewReport(d, reportId) {
+      return d.keys().hasOnly([
+          'reportId', 'userId', 'category', 'urgency', 'urgencyWeight', 'description',
+          'translatedDescription', 'originalLanguage', 'isSOS', 'location', 'mediaUrl',
+          'processedBy', 'confidenceScore', 'status', 'assignedDashboard', 'isDuplicateOf',
+          'escalated', 'escalatedAt', 'createdAt', 'syncedAt', 'updatedAt',
+          'assignedTeamOrUnit', 'acknowledgedAt', 'resolvedNotes', 'activityTrail',
+          'peopleAffected', 'reportedInjuries'
+        ])
+        && d.keys().hasAll([
+          'reportId', 'userId', 'category', 'urgency', 'urgencyWeight', 'description',
+          'translatedDescription', 'originalLanguage', 'isSOS', 'location', 'mediaUrl',
+          'processedBy', 'confidenceScore', 'status', 'assignedDashboard', 'isDuplicateOf',
+          'escalated', 'escalatedAt', 'createdAt', 'syncedAt', 'updatedAt',
+          'assignedTeamOrUnit', 'acknowledgedAt', 'resolvedNotes', 'activityTrail',
+          'peopleAffected', 'reportedInjuries'
+        ])
+        && d.reportId == reportId
+        && d.userId == request.auth.uid
+        && d.category in ['medical', 'water', 'shelter', 'missing_person', 'other']
+        && d.urgency in ['critical', 'high', 'normal']
+        && d.urgencyWeight == (d.urgency == 'critical' ? 3 : (d.urgency == 'high' ? 2 : 1))
+        && d.description is string && d.description.size() >= 1 && d.description.size() <= 1000
+        && (d.translatedDescription == null
+            || (d.translatedDescription is string && d.translatedDescription.size() <= 1000))
+        && d.originalLanguage is string
+        && d.originalLanguage.size() >= 2 && d.originalLanguage.size() <= 16
+        && d.isSOS is bool
+        && (d.isSOS == false || d.urgency == 'critical')
+        && isValidLocation(d.location)
+        && d.mediaUrl == null
+        && d.processedBy in ['on-device', 'cloud']
+        && d.confidenceScore is number && d.confidenceScore >= 0 && d.confidenceScore <= 1
+        && d.status == 'received'
+        && d.assignedDashboard in ['medical', 'rescue']
+        && d.isDuplicateOf == null
+        && d.escalated == false
+        && d.escalatedAt == null
+        && d.assignedTeamOrUnit == null
+        && d.acknowledgedAt == null
+        && d.resolvedNotes == null
+        && d.createdAt == request.time
+        && d.syncedAt == request.time
+        && d.updatedAt == request.time
+        && isValidInitialTrail(d.activityTrail)
+        && d.peopleAffected is int && d.peopleAffected >= 1 && d.peopleAffected <= 500
+        && (d.reportedInjuries == null
+            || (d.reportedInjuries is string && d.reportedInjuries.size() <= 500));
     }
 
     // ===============================================================
@@ -96,33 +137,41 @@ service cloud.firestore {
     // ===============================================================
 
     // reports/{reportId}
+    //   read:   the citizen who filed it, or any responder (medical, rescue, admin)
+    //   create: only the signed-in owner, only in the exact initial state
+    //   update/delete: never from a client (server routes use the Admin SDK)
     match /reports/{reportId} {
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isResponder());
-      allow update: if isSignedIn() && isResponder();
-      allow delete: if false;
+      allow create: if isSignedIn() && isValidNewReport(request.resource.data, reportId);
+      allow update, delete: if false;
     }
 
-    // alerts/{alertId}
+    // alerts/{alertId}: everyone signed in can read; only the server (POST /api/alerts) writes
     match /alerts/{alertId} {
       allow read: if isSignedIn();
-      allow create, update, delete: if isSignedIn() && isResponder();
+      allow create, update, delete: if false;
     }
 
     // users/{userId}
+    //   read:   own document, or admin
+    //   create: server only (POST /api/auth/role)
+    //   update: own document, display fields only. The role can never be changed by a client.
     match /users/{userId} {
-      allow read, write: if isSignedIn() && (request.auth.uid == userId || getUserRole() == "admin");
+      allow read: if isSignedIn() && (request.auth.uid == userId || isAdmin());
+      allow create: if false;
+      allow update: if isSignedIn() && request.auth.uid == userId && isValidProfileUpdate();
+      allow delete: if false;
     }
 
-    // resources/{resourceId}
+    // resources/{resourceId}: not implemented yet. Server-only writes until it is built.
     match /resources/{resourceId} {
       allow read: if isSignedIn();
-      allow write: if isSignedIn() && isResponder();
+      allow write: if false;
     }
 
-    // escalationLog/{logId}
+    // escalationLog/{logId}: audit trail. Responders can read; only the server writes.
     match /escalationLog/{logId} {
-      allow read: if isSignedIn() && isResponder();
+      allow read: if isResponder();
       allow write: if false;
     }
   }
