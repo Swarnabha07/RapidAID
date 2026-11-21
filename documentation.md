@@ -96,7 +96,7 @@ Feed      Dashboard  Dashboard
 | Frontend | Next.js, React, Tailwind CSS, shadcn/ui, Framer Motion |
 | AI | Firebase AI Logic — Gemini Nano 4 (on-device) + cloud Gemini fallback |
 | Database | Firestore (offline persistence, real-time sync) |
-| Auth | Firebase Authentication (role-gated: User / Medical / Rescue) |
+| Auth | Firebase Authentication. Roles (victim / medical / rescue / admin) are signed custom claims, provisioned by an administrator with `scripts/set-role.mjs`; never self-assigned |
 | Security | Firebase App Check |
 | Offline / PWA | next-pwa (service worker, offline caching) |
 | Notifications | Firebase Cloud Messaging |
@@ -108,6 +108,8 @@ Feed      Dashboard  Dashboard
 ## 8. Scope & Responsible Use
 
 RapidAID is a **routing and triage tool for human responders** — it never makes medical decisions, never tells a user "help is coming," and never replaces professional judgment. Its job is to structure and prioritize information so human teams can act faster. All demo data used in our video and repository is simulated; no real victim data is used.
+
+**Access control.** New accounts are always citizens. Only a trusted administrator can grant a responder or admin role (`node scripts/set-role.mjs`, Firebase Admin SDK). Firestore rules and server routes read the role only from the signed token claim. Citizens create reports directly in Firestore (offline-capable) in the initial `received` state only; responders change reports exclusively through authenticated server routes (`PATCH /api/reports/[id]`) that enforce dashboard ownership and valid status transitions and record the responder's verified UID.
 
 ## 9. Setup & Running Locally
 

@@ -15,19 +15,13 @@ import {
   updateProfile,
   sendPasswordResetEmail,
   signOut,
-  onAuthStateChanged,
+  onIdTokenChanged,
   type User,
   type UserCredential,
 } from "firebase/auth";
-import {
-  doc,
-  getDoc,
-  setDoc,
-  updateDoc,
-  serverTimestamp,
-} from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase/config";
-import type { UserProfile, UserRole } from "@/lib/types/user";
+import { normalizeRole, type UserProfile, type UserRole } from "@/lib/types/user";
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
@@ -50,14 +44,12 @@ export function getRoleRedirectPath(role: UserRole | string | null | undefined):
 }
 
 /**
- * Synchronizes user role custom claims via the server-side API endpoint.
+ * Asks the server to set up this account (users/{uid} document and the default "victim" role claim).
+ *
+ * SECURITY: the client can NOT choose a role. The server ignores any role sent from the browser.
+ * Medical, rescue and admin roles are granted only by an administrator using scripts/set-role.mjs.
  */
-async function syncCustomClaims(
-  user: User,
-  role: UserRole,
-  displayName?: string,
-  preferredLanguage: string = "en"
-): Promise<void> {
+async function syncAccount(user: User, displayName?: string): Promise<void> {
   try {
     const token = await user.getIdToken();
     const res = await fetch("/api/auth/role", {
@@ -67,65 +59,36 @@ async function syncCustomClaims(
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify({
-        role,
-        displayName: displayName || user.displayName || "User",
-        preferredLanguage,
+        displayName: displayName || user.displayName || undefined,
       }),
     });
     if (!res.ok) {
-      console.warn("syncCustomClaims response was not ok:", res.status);
+      console.warn("Account setup via /api/auth/role was not ok:", res.status);
     }
   } catch (err) {
-    console.error("Failed to sync custom claims via /api/auth/role:", err);
+    console.error("Failed to set up account via /api/auth/role:", err);
   }
 }
 
 /**
- * Ensures a user document exists in users/{userId} and syncs roles.
+ * Runs after every successful sign-in: server account setup, then a forced token refresh
+ * so the new custom claim (if any) is present in the ID token.
  */
-async function ensureUserDoc(
-  user: User,
-  preferredRole?: UserRole
-): Promise<UserRole> {
-  const userRef = doc(db, "users", user.uid);
-  const snap = await getDoc(userRef);
-
-  if (!snap.exists()) {
-    const assignedRole: UserRole = preferredRole || "victim";
-    const initialProfile: UserProfile = {
-      userId: user.uid,
-      displayName: user.displayName || user.email?.split("@")[0] || "User",
-      role: assignedRole,
-      preferredLanguage: "en",
-      fcmToken: null,
-      createdAt: serverTimestamp() as any,
-      lastActiveAt: serverTimestamp() as any,
-      email: user.email || null,
-      phoneNumber: user.phoneNumber || null,
-    };
-
-    await setDoc(userRef, initialProfile);
-    await syncCustomClaims(user, assignedRole, user.displayName || undefined);
-    await user.getIdToken(true);
-    return assignedRole;
-  } else {
-    await updateDoc(userRef, {
-      lastActiveAt: serverTimestamp(),
-    });
-    const existingRole = (snap.data()?.role as UserRole) || "victim";
-    return existingRole;
-  }
+async function completeSignIn(user: User, displayName?: string): Promise<void> {
+  await syncAccount(user, displayName);
+  await user.getIdToken(true);
 }
 
 /**
  * Sign in using Google OAuth Popup.
  */
 export async function signInWithGoogle(
-  preferredRole?: UserRole
+  // Kept for backward compatibility. Roles can no longer be chosen by the client; this is ignored.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _preferredRole?: UserRole
 ): Promise<UserCredential> {
   const cred = await signInWithPopup(auth, googleProvider);
-  await ensureUserDoc(cred.user, preferredRole);
-  await cred.user.getIdToken(true);
+  await completeSignIn(cred.user);
   return cred;
 }
 
@@ -137,26 +100,26 @@ export async function signInWithEmail(
   password: string
 ): Promise<UserCredential> {
   const cred = await signInWithEmailAndPassword(auth, email, password);
-  await ensureUserDoc(cred.user);
-  await cred.user.getIdToken(true);
+  await completeSignIn(cred.user);
   return cred;
 }
 
 /**
- * Sign up with Email and Password, creating a profile and custom claims.
+ * Sign up with Email and Password. New accounts always start as "victim".
  */
 export async function signUpWithEmail(
   email: string,
   password: string,
   displayName: string,
-  role: UserRole = "victim"
+  // Kept for backward compatibility. Every new account is "victim"; this is ignored.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _role: UserRole = "victim"
 ): Promise<UserCredential> {
   const cred = await createUserWithEmailAndPassword(auth, email, password);
   if (displayName) {
     await updateProfile(cred.user, { displayName });
   }
-  await ensureUserDoc(cred.user, role);
-  await cred.user.getIdToken(true);
+  await completeSignIn(cred.user, displayName);
   return cred;
 }
 
@@ -216,27 +179,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const fetchProfileAndRole = useCallback(async (firebaseUser: User) => {
+    // The role comes ONLY from the signed token claim (set by the server / set-role script).
+    let resolvedRole: UserRole = "victim";
     try {
-      const userRef = doc(db, "users", firebaseUser.uid);
-      const snap = await getDoc(userRef);
-
-      if (snap.exists()) {
-        const data = snap.data() as UserProfile;
-        setProfile(data);
-        const resolvedRole = (data.role as UserRole) || "victim";
-        setRole(resolvedRole);
-        return resolvedRole;
-      } else {
-        // Doc might still be initializing
-        const tokenResult = await firebaseUser.getIdTokenResult();
-        const claimRole = (tokenResult.claims.role as UserRole) || "victim";
-        setRole(claimRole);
-        return claimRole;
-      }
+      const tokenResult = await firebaseUser.getIdTokenResult();
+      resolvedRole = normalizeRole(tokenResult.claims.role);
     } catch (err) {
-      console.error("Error fetching user profile from Firestore:", err);
-      return null;
+      console.error("Error reading token claims:", err);
     }
+    setRole(resolvedRole);
+
+    // The profile document is display-only data (name, language). It never decides access.
+    try {
+      const snap = await getDoc(doc(db, "users", firebaseUser.uid));
+      setProfile(snap.exists() ? (snap.data() as UserProfile) : null);
+    } catch (err) {
+      console.warn("Could not load user profile (offline or not created yet):", err);
+    }
+    return resolvedRole;
   }, []);
 
   const refreshUserRole = useCallback(async (): Promise<UserRole | null> => {
@@ -250,7 +210,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [fetchProfileAndRole]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    // onIdTokenChanged also fires when the token is refreshed, so a changed role claim is picked up.
+    const unsubscribe = onIdTokenChanged(auth, async (firebaseUser) => {
       setUser(firebaseUser);
       if (firebaseUser) {
         await fetchProfileAndRole(firebaseUser);

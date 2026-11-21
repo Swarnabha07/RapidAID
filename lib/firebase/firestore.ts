@@ -3,16 +3,14 @@ import {
   doc,
   getDoc,
   setDoc,
-  updateDoc,
   query,
   where,
   orderBy,
   onSnapshot,
   serverTimestamp,
-  arrayUnion,
   type Unsubscribe,
 } from "firebase/firestore";
-import { db } from "@/lib/firebase/config";
+import { db, auth } from "@/lib/firebase/config";
 import type {
   Report,
   ReportCategory,
@@ -406,57 +404,44 @@ export function subscribeToUserRequests(
 // Responder Dialog Action Helpers
 // ---------------------------------------------------------------------------
 
-async function patchReportFallback(reportId: string, updates: Record<string, any>): Promise<void> {
-  const { auth } = await import("@/lib/firebase/config");
+/**
+ * Sends a responder action to the server. Responders can NOT write reports directly
+ * (Firestore rules block it); the server verifies the token, role, dashboard ownership and
+ * state transition, then records the trusted actor and timestamp.
+ */
+async function sendReportAction(
+  reportId: string,
+  payload: Record<string, unknown>
+): Promise<void> {
   const currentUser = auth.currentUser;
-  const token = currentUser ? await currentUser.getIdToken() : "";
+  if (!currentUser) throw new Error("You must be signed in to update a report.");
+  const token = await currentUser.getIdToken();
   const res = await fetch(`/api/reports/${encodeURIComponent(reportId)}`, {
     method: "PATCH",
     headers: {
       "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify(updates),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error || `Server update failed with HTTP ${res.status}`);
+    throw new Error(errorData.error || `Report update failed with HTTP ${res.status}`);
   }
 }
 
 /**
  * Acknowledges an incident from the AcknowledgeDialog.
- * Stops the overdue countdown and records responder attribution.
+ * Stops the overdue countdown. The acknowledging responder is taken from the verified token,
+ * so `responderName` is kept only for backward compatibility and is ignored.
  */
 export async function acknowledgeReport(
   reportId: string,
   note?: string,
-  responderName: string = "Verified Coordinator"
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  responderName?: string
 ): Promise<void> {
-  const record = createActivityRecord(
-    "Incident acknowledged",
-    responderName,
-    note || "Acknowledgement confirmed by coordinator"
-  );
-
-  try {
-    const ref = doc(db, "reports", reportId);
-    await updateDoc(ref, {
-      acknowledgedAt: serverTimestamp(),
-      acknowledgedBy: responderName,
-      status: "in_progress",
-      updatedAt: serverTimestamp(),
-      activityTrail: arrayUnion(record),
-    });
-  } catch (err) {
-    console.warn("Direct acknowledgeReport error, attempting PATCH fallback:", err);
-    await patchReportFallback(reportId, {
-      acknowledgedAt: true,
-      status: "in_progress",
-      action: "Incident acknowledged",
-      activityNote: note || "Acknowledgement confirmed by coordinator",
-    });
-  }
+  await sendReportAction(reportId, { action: "acknowledge", note });
 }
 
 /**
@@ -466,104 +451,33 @@ export async function assignResponderUnit(
   reportId: string,
   unitName: string,
   note?: string,
-  responderName: string = "Duty Coordinator"
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  responderName?: string
 ): Promise<void> {
-  const record = createActivityRecord(
-    `Unit assigned: ${unitName}`,
-    responderName,
-    note || `Assigned to ${unitName}`
-  );
-
-  try {
-    const ref = doc(db, "reports", reportId);
-    await updateDoc(ref, {
-      assignedTeamOrUnit: unitName,
-      status: "dispatched",
-      updatedAt: serverTimestamp(),
-      activityTrail: arrayUnion(record),
-    });
-  } catch (err) {
-    console.warn("Direct assignResponderUnit error, attempting PATCH fallback:", err);
-    await patchReportFallback(reportId, {
-      assignedTeamOrUnit: unitName,
-      status: "dispatched",
-      action: `Unit assigned: ${unitName}`,
-      activityNote: note || `Assigned to ${unitName}`,
-    });
-  }
+  await sendReportAction(reportId, { action: "assign", unitName, note });
 }
 
 /**
- * Manually escalates a report to higher priority/level from EscalateDialog.
+ * Manually escalates a report from EscalateDialog. Urgency can only be raised, never lowered.
  */
 export async function escalateReportManual(
   reportId: string,
   urgency: ReportUrgency,
   reason: string,
-  responderName: string = "Authorized Coordinator"
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  responderName?: string
 ): Promise<void> {
-  const weight = getUrgencyWeight(urgency);
-  const record = createActivityRecord(
-    `Escalated to ${urgency.toUpperCase()}`,
-    responderName,
-    reason
-  );
-
-  try {
-    const ref = doc(db, "reports", reportId);
-    await updateDoc(ref, {
-      escalated: true,
-      escalatedAt: serverTimestamp(),
-      urgency,
-      urgencyWeight: weight,
-      updatedAt: serverTimestamp(),
-      activityTrail: arrayUnion(record),
-    });
-  } catch (err) {
-    console.warn("Direct escalateReportManual error, attempting PATCH fallback:", err);
-    await patchReportFallback(reportId, {
-      escalated: true,
-      urgency,
-      urgencyWeight: weight,
-      escalationReason: reason,
-      previousUrgency: "normal",
-      newUrgency: urgency,
-      action: `Escalated to ${urgency.toUpperCase()}`,
-      activityNote: reason,
-    });
-  }
+  await sendReportAction(reportId, { action: "escalate", urgency, reason });
 }
 
 /**
  * Resolves an incident from the ResolveDialog.
- * Closes the active report and logs outcome notes to the audit trail.
  */
 export async function resolveReport(
   reportId: string,
   resolutionNote: string,
-  responderName: string = "Verified Lead"
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  responderName?: string
 ): Promise<void> {
-  const record = createActivityRecord(
-    "Incident resolved",
-    responderName,
-    resolutionNote
-  );
-
-  try {
-    const ref = doc(db, "reports", reportId);
-    await updateDoc(ref, {
-      status: "resolved",
-      resolvedNotes: resolutionNote,
-      updatedAt: serverTimestamp(),
-      activityTrail: arrayUnion(record),
-    });
-  } catch (err) {
-    console.warn("Direct resolveReport error, attempting PATCH fallback:", err);
-    await patchReportFallback(reportId, {
-      status: "resolved",
-      resolvedNotes: resolutionNote,
-      action: "Incident resolved",
-      activityNote: resolutionNote,
-    });
-  }
+  await sendReportAction(reportId, { action: "resolve", resolutionNote });
 }
