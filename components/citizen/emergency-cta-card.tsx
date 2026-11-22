@@ -1,17 +1,27 @@
 "use client";
 
 import { useState } from "react";
-import { AlertTriangle, ChevronRight, Cloud, ShieldCheck, Check, Loader2 } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronRight,
+  Cloud,
+  ShieldCheck,
+  Check,
+  Loader2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/lib/firebase/auth";
+import { ensureEmergencyUser } from "@/lib/firebase/auth";
 import { createReport, type CreateReportInput } from "@/lib/firebase/firestore";
+import { getCurrentLocation } from "@/lib/utils/get-current-location";
 
 export interface EmergencyCtaCardProps {
   /**
    * Optional custom submission handler so P1 can drop in on-device AI classification
    * and SOS voice capture directly.
    */
-  onSubmitEmergency?: (customPayload?: Partial<CreateReportInput>) => Promise<string | void>;
+  onSubmitEmergency?: (
+    customPayload?: Partial<CreateReportInput>,
+  ) => Promise<string | void>;
   onViewRequests?: () => void;
   pendingCount?: number;
   lastSyncedTime?: string;
@@ -23,51 +33,36 @@ export function EmergencyCtaCard({
   pendingCount = 0,
   lastSyncedTime = "10:42 AM",
 }: EmergencyCtaCardProps) {
-  const { user } = useAuth();
   const [submitting, setSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [feedback, setFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
 
   const handleReportEmergency = async () => {
     setSubmitting(true);
     setFeedback(null);
 
     try {
+      const emergencyUser = await ensureEmergencyUser();
       if (onSubmitEmergency) {
-        await onSubmitEmergency();
-        setFeedback({ type: "success", message: "Emergency assistance request submitted." });
-      } else {
-        const fallbackLocation = {
-          lat: 40.7128,
-          lng: -74.006,
-          address: "Citizen Device Location (Auto-detected)",
-          zone: "Sector Alpha",
-        };
-
-        const location = await new Promise<{ lat: number; lng: number; address: string; zone: string }>((resolve) => {
-          if (typeof window !== "undefined" && navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(
-              (pos) => {
-                resolve({
-                  lat: pos.coords.latitude,
-                  lng: pos.coords.longitude,
-                  address: `GPS: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`,
-                  zone: "North District",
-                });
-              },
-              () => resolve(fallbackLocation),
-              { timeout: 3000 }
-            );
-          } else {
-            resolve(fallbackLocation);
-          }
+        await onSubmitEmergency({
+          userId: emergencyUser.uid,
         });
+        setFeedback({
+          type: "success",
+          message: "Emergency assistance request submitted.",
+        });
+      } else {
+        const location = await getCurrentLocation();
 
         const reportId = await createReport({
-          userId: user?.uid || "anonymous_citizen",
+          userId: emergencyUser.uid,
           category: "medical",
           urgency: "critical",
           isSOS: true,
-          description: "⚡ Emergency Assistance Request: Citizen pressed one-tap SOS beacon. Immediate responder dispatch requested.",
+          description:
+            "⚡ Emergency Assistance Request: Citizen pressed one-tap SOS beacon. Immediate responder dispatch requested.",
           location,
           processedBy: "on-device",
           confidenceScore: 1.0,
@@ -75,14 +70,16 @@ export function EmergencyCtaCard({
 
         setFeedback({
           type: "success",
-          message: `Emergency SOS dispatched! Report #${reportId.slice(0, 8)}. Responders notified.`,
+          message: `Emergency report submitted. Report #${reportId.slice(0, 8)}.`,
         });
       }
     } catch (err: any) {
       console.error("Emergency report submission error:", err);
       setFeedback({
         type: "error",
-        message: err.message || "Failed to submit emergency report. Please call emergency services or try again.",
+        message:
+          err.message ||
+          "Failed to submit emergency report. Please call emergency services or try again.",
       });
     } finally {
       setSubmitting(false);
@@ -102,10 +99,14 @@ export function EmergencyCtaCard({
 
   return (
     <div className="relative overflow-hidden rounded-[var(--radius-lg)] border border-black/8 bg-white p-6 sm:p-8">
-      <span className="absolute inset-y-0 left-0 w-1 rounded-l-[var(--radius-lg)] bg-critical" aria-hidden />
+      <span
+        className="absolute inset-y-0 left-0 w-1 rounded-l-[var(--radius-lg)] bg-critical"
+        aria-hidden
+      />
 
       <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-critical">
-        <span className="h-1.5 w-1.5 rounded-full bg-critical" /> Emergency assistance
+        <span className="h-1.5 w-1.5 rounded-full bg-critical" /> Emergency
+        assistance
       </p>
 
       <h1 className="mt-3 text-[2rem] font-semibold leading-[1.1] sm:text-[2.3rem]">
@@ -160,7 +161,10 @@ export function EmergencyCtaCard({
         <span>Simple 5-step form</span>
       </div>
 
-      <SyncStatusCard pendingCount={pendingCount} lastSyncedTime={lastSyncedTime} />
+      <SyncStatusCard
+        pendingCount={pendingCount}
+        lastSyncedTime={lastSyncedTime}
+      />
     </div>
   );
 }
@@ -193,11 +197,15 @@ function SyncStatusCard({
       <div className="mt-4 grid grid-cols-2 gap-4 border-t border-black/8 pt-4">
         <div>
           <p className="text-[11px] text-text-secondary">Pending</p>
-          <p className="text-[15px] font-semibold text-text-primary">{pendingCount}</p>
+          <p className="text-[15px] font-semibold text-text-primary">
+            {pendingCount}
+          </p>
         </div>
         <div>
           <p className="text-[11px] text-text-secondary">Last synchronized</p>
-          <p className="text-[15px] font-semibold text-text-primary">{lastSyncedTime}</p>
+          <p className="text-[15px] font-semibold text-text-primary">
+            {lastSyncedTime}
+          </p>
         </div>
       </div>
 

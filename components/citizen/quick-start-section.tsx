@@ -12,10 +12,11 @@ import {
   CheckCircle2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/lib/firebase/auth";
+import { ensureEmergencyUser } from "@/lib/firebase/auth";
 import { createReport, type CreateReportInput } from "@/lib/firebase/firestore";
 import type { ReportCategory } from "@/lib/types/report";
 import { Button } from "@/components/ui/button";
+import { getCurrentLocation } from "@/lib/utils/get-current-location";
 
 const CATEGORIES: {
   label: string;
@@ -38,23 +39,25 @@ export interface QuickStartSectionProps {
   onSubmitCategoryReport?: (
     category: ReportCategory,
     categoryLabel: string,
-    customPayload?: Partial<CreateReportInput>
+    customPayload?: Partial<CreateReportInput>,
   ) => Promise<string | void>;
-  onCategorySelected?: (categoryLabel: string, category: ReportCategory) => void;
+  onCategorySelected?: (
+    categoryLabel: string,
+    category: ReportCategory,
+  ) => void;
 }
 
 export function QuickStartSection({
   onSubmitCategoryReport,
   onCategorySelected,
 }: QuickStartSectionProps) {
-  const { user } = useAuth();
   const [selected, setSelected] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<string | null>(null);
 
   const selectedCategoryObj = CATEGORIES.find((cat) => cat.label === selected);
 
-  const handleSelect = (cat: typeof CATEGORIES[number]) => {
+  const handleSelect = (cat: (typeof CATEGORIES)[number]) => {
     setSelected(cat.label);
     setFeedback(null);
     if (onCategorySelected) {
@@ -69,41 +72,24 @@ export function QuickStartSection({
     setFeedback(null);
 
     try {
+      const emergencyUser = await ensureEmergencyUser();
       if (onSubmitCategoryReport) {
-        await onSubmitCategoryReport(selectedCategoryObj.category, selectedCategoryObj.label);
+        await onSubmitCategoryReport(
+          selectedCategoryObj.category,
+          selectedCategoryObj.label,
+          {
+            userId: emergencyUser.uid,
+          },
+        );
         setFeedback(`Report for ${selectedCategoryObj.label} submitted.`);
       } else {
-        const fallbackLocation = {
-          lat: 40.7128,
-          lng: -74.006,
-          address: "Citizen Device Location (Quick Start)",
-          zone: "Sector Alpha",
-        };
-
-        const location = await new Promise<{ lat: number; lng: number; address: string; zone: string }>((resolve) => {
-          if (typeof window !== "undefined" && navigator.geolocation) {
-            navigator.geolocation.getCurrentPosition(
-              (pos) => {
-                resolve({
-                  lat: pos.coords.latitude,
-                  lng: pos.coords.longitude,
-                  address: `GPS: ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`,
-                  zone: "North District",
-                });
-              },
-              () => resolve(fallbackLocation),
-              { timeout: 3000 }
-            );
-          } else {
-            resolve(fallbackLocation);
-          }
-        });
+        const location = await getCurrentLocation();
 
         const isMedical = selectedCategoryObj.category === "medical";
         const urgency = isMedical ? "critical" : "high";
 
         const reportId = await createReport({
-          userId: user?.uid || "anonymous_citizen",
+          userId: emergencyUser.uid,
           category: selectedCategoryObj.category,
           urgency,
           isSOS: false,
@@ -115,9 +101,13 @@ export function QuickStartSection({
 
         setFeedback(`Request logged! Report #${reportId.slice(0, 8)} created.`);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Quick start report submission error:", err);
-      setFeedback("Failed to submit request. Please try again.");
+      setFeedback(
+        err instanceof Error
+          ? err.message
+          : "Failed to submit request. Please try again.",
+      );
     } finally {
       setSubmitting(false);
     }
@@ -147,13 +137,17 @@ export function QuickStartSection({
               "flex min-h-24 flex-col items-start justify-between rounded-[var(--radius-md)] border bg-white p-4 text-left transition-colors",
               selected === cat.label
                 ? "border-brand-blue ring-1 ring-brand-blue"
-                : "border-black/8 hover:border-black/20"
+                : "border-black/8 hover:border-black/20",
             )}
           >
             <cat.icon
               size={20}
               strokeWidth={1.75}
-              className={selected === cat.label ? "text-brand-blue" : "text-text-secondary"}
+              className={
+                selected === cat.label
+                  ? "text-brand-blue"
+                  : "text-text-secondary"
+              }
             />
             <span className="mt-3 text-[13.5px] font-medium text-text-primary">
               {cat.label}
@@ -179,7 +173,9 @@ export function QuickStartSection({
             disabled={submitting}
             className="bg-brand-blue hover:brightness-110"
           >
-            {submitting && <Loader2 size={14} className="mr-1.5 animate-spin" />}
+            {submitting && (
+              <Loader2 size={14} className="mr-1.5 animate-spin" />
+            )}
             {submitting ? "Submitting..." : `Submit ${selected} Request`}
           </Button>
         </div>

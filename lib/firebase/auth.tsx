@@ -16,19 +16,26 @@ import {
   sendPasswordResetEmail,
   signOut,
   onIdTokenChanged,
+  signInAnonymously,
   type User,
   type UserCredential,
 } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "@/lib/firebase/config";
-import { normalizeRole, type UserProfile, type UserRole } from "@/lib/types/user";
+import {
+  normalizeRole,
+  type UserProfile,
+  type UserRole,
+} from "@/lib/types/user";
 
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({
   prompt: "select_account",
 });
 
-export function getRoleRedirectPath(role: UserRole | string | null | undefined): string {
+export function getRoleRedirectPath(
+  role: UserRole | string | null | undefined,
+): string {
   switch (role) {
     case "victim":
       return "/home";
@@ -80,12 +87,31 @@ async function completeSignIn(user: User, displayName?: string): Promise<void> {
 }
 
 /**
+ * Ensures a Firebase-authenticated user exists for emergency reporting.
+ *
+ * Existing signed-in users are reused. Visitors without an account receive
+ * a Firebase anonymous session. Anonymous users are NOT passed through
+ * completeSignIn() and are never assigned a responder role.
+ */
+export async function ensureEmergencyUser(): Promise<User> {
+  // Wait until Firebase has restored any persisted authentication session.
+  await auth.authStateReady();
+
+  if (auth.currentUser) {
+    return auth.currentUser;
+  }
+
+  const credential = await signInAnonymously(auth);
+  return credential.user;
+}
+
+/**
  * Sign in using Google OAuth Popup.
  */
 export async function signInWithGoogle(
   // Kept for backward compatibility. Roles can no longer be chosen by the client; this is ignored.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _preferredRole?: UserRole
+  _preferredRole?: UserRole,
 ): Promise<UserCredential> {
   const cred = await signInWithPopup(auth, googleProvider);
   await completeSignIn(cred.user);
@@ -97,7 +123,7 @@ export async function signInWithGoogle(
  */
 export async function signInWithEmail(
   email: string,
-  password: string
+  password: string,
 ): Promise<UserCredential> {
   const cred = await signInWithEmailAndPassword(auth, email, password);
   await completeSignIn(cred.user);
@@ -113,7 +139,7 @@ export async function signUpWithEmail(
   displayName: string,
   // Kept for backward compatibility. Every new account is "victim"; this is ignored.
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  _role: UserRole = "victim"
+  _role: UserRole = "victim",
 ): Promise<UserCredential> {
   const cred = await createUserWithEmailAndPassword(auth, email, password);
   if (displayName) {
@@ -152,7 +178,7 @@ interface AuthContextType {
     email: string,
     password: string,
     displayName: string,
-    role?: UserRole
+    role?: UserRole,
   ) => Promise<UserCredential>;
   resetPassword: (email: string) => Promise<void>;
   signOutUser: () => Promise<void>;
@@ -194,7 +220,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const snap = await getDoc(doc(db, "users", firebaseUser.uid));
       setProfile(snap.exists() ? (snap.data() as UserProfile) : null);
     } catch (err) {
-      console.warn("Could not load user profile (offline or not created yet):", err);
+      console.warn(
+        "Could not load user profile (offline or not created yet):",
+        err,
+      );
     }
     return resolvedRole;
   }, []);
