@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { Menu, X } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { EmergencyHelpButton } from "@/components/landing/emergency-help-button";
 
 const NAV_LINKS = [
   { label: "Platform", href: "#platform" },
@@ -19,7 +19,11 @@ export function SiteNavbar() {
     <header className="sticky top-0 z-50 border-b border-white/10 bg-ink/95 backdrop-blur supports-[backdrop-filter]:bg-ink/80">
       <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 sm:px-8">
         <Link href="/" className="flex items-center gap-2">
-          <img src="/logo.svg" alt="RapidAID Logo" className="h-9 w-9 object-contain" />
+          <img
+            src="/logo.svg"
+            alt="RapidAID Logo"
+            className="h-9 w-9 object-contain"
+          />
           <span className="text-[15px] font-semibold text-white">RapidAID</span>
         </Link>
 
@@ -42,7 +46,7 @@ export function SiteNavbar() {
           >
             Sign In
           </Link>
-          <Button size="sm">Request Emergency Help</Button>
+          <EmergencyHelpButton size="sm" />
         </div>
 
         <button
@@ -76,7 +80,7 @@ export function SiteNavbar() {
               Sign In
             </Link>
           </nav>
-          <Button className="mt-3 w-full">Request Emergency Help</Button>
+          <EmergencyHelpButton className="mt-3 w-full" />
         </div>
       )}
     </header>

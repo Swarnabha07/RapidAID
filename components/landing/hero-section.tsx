@@ -1,5 +1,6 @@
 import { Minus, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { EmergencyHelpButton } from "@/components/landing/emergency-help-button";
 
 export function HeroSection() {
   return (
@@ -14,12 +15,12 @@ export function HeroSection() {
           </h1>
           <p className="mt-5 max-w-md text-[15px] leading-relaxed text-text-inverse-muted">
             RapidAID connects people affected by disasters with emergency
-            response teams through intelligent triage, offline-first
-            reporting, and coordinated emergency response.
+            response teams through intelligent triage, offline-first reporting,
+            and coordinated emergency response.
           </p>
 
           <div className="mt-8 flex flex-col gap-3 sm:flex-row">
-            <Button size="lg">Request Emergency Help</Button>
+            <EmergencyHelpButton size="lg" />
             <Button size="lg" variant="outlineInverse">
               Explore the Platform ↗
             </Button>
@@ -58,9 +59,24 @@ function ResponseOverviewPreview() {
 
         {/* fictional "streets" */}
         <svg className="absolute inset-0 h-full w-full opacity-30" aria-hidden>
-          <path d="M0 60 L300 90 L600 40" stroke="#3a4a5f" strokeWidth="1.5" fill="none" />
-          <path d="M40 0 L80 260" stroke="#3a4a5f" strokeWidth="1.5" fill="none" />
-          <path d="M20 180 L320 150" stroke="#3a4a5f" strokeWidth="1.5" fill="none" />
+          <path
+            d="M0 60 L300 90 L600 40"
+            stroke="#3a4a5f"
+            strokeWidth="1.5"
+            fill="none"
+          />
+          <path
+            d="M40 0 L80 260"
+            stroke="#3a4a5f"
+            strokeWidth="1.5"
+            fill="none"
+          />
+          <path
+            d="M20 180 L320 150"
+            stroke="#3a4a5f"
+            strokeWidth="1.5"
+            fill="none"
+          />
         </svg>
 
         <IncidentPin className="left-[18%] top-[32%]" tone="bg-critical" />
@@ -74,7 +90,9 @@ function ResponseOverviewPreview() {
           <p className="mt-0.5 text-[12px] font-medium text-white">
             Medical assistance
           </p>
-          <p className="text-[11px] text-text-inverse-muted">RPT-0248 · 2 min ago</p>
+          <p className="text-[11px] text-text-inverse-muted">
+            RPT-0248 · 2 min ago
+          </p>
         </div>
 
         <div className="absolute bottom-2 right-2 flex flex-col gap-1">
@@ -123,7 +141,9 @@ function ResponseOverviewPreview() {
 function IncidentPin({ className, tone }: { className: string; tone: string }) {
   return (
     <span className={`absolute ${className}`}>
-      <span className={`block h-2.5 w-2.5 rounded-full ${tone} ring-4 ring-white/10`} />
+      <span
+        className={`block h-2.5 w-2.5 rounded-full ${tone} ring-4 ring-white/10`}
+      />
     </span>
   );
 }
