@@ -1,206 +1,38 @@
 /**
- * Pure (Firebase-free) validation and state-transition rules for reports.
- * Used by the server routes so every privileged write is checked in one place,
- * and so the logic can be unit-tested without Firestore.
+ * Server-side responder-action rules (state machine) for reports.
+ * Used by PATCH /api/reports/[id] so every privileged write is checked in one place, and so the
+ * logic can be unit-tested without Firestore.
+ *
+ * Shared constants and the citizen-report validation now live in `lib/constants/report.ts` and
+ * `lib/validation/report.ts` (browser-safe, used by the client too). They are re-exported here so
+ * existing imports keep working.
  */
-import type {
-  ReportCategory,
-  ReportUrgency,
-  ReportUrgencyWeight,
-  ReportStatus,
-  ReportDashboard,
-  ReportProcessor,
-} from "@/lib/types/report";
+import type { ReportStatus, ReportUrgency } from "@/lib/constants/report";
+import {
+  REPORT_LIMITS,
+  REPORT_URGENCIES,
+  urgencyWeightOf,
+} from "@/lib/constants/report";
+import { cleanText } from "@/lib/validation/report";
+import type { EscalationLogEntry } from "@/lib/types/escalation-log";
 
-export const REPORT_CATEGORIES: readonly ReportCategory[] = [
-  "medical",
-  "water",
-  "shelter",
-  "missing_person",
-  "other",
-];
-export const REPORT_URGENCIES: readonly ReportUrgency[] = ["critical", "high", "normal"];
+export {
+  REPORT_CATEGORIES,
+  REPORT_URGENCIES,
+  urgencyWeightOf,
+  dashboardForCategory,
+} from "@/lib/constants/report";
+export { cleanText, validateNewReport } from "@/lib/validation/report";
+export type { ValidatedNewReport } from "@/lib/validation/report";
 
-const MAX_DESCRIPTION = 1000;
-const MAX_ADDRESS = 300;
-const MAX_ZONE = 100;
-const MAX_SHORT_TEXT = 500;
-const MAX_NOTE = 500;
-const MAX_RESOLUTION_NOTE = 1000;
-const MAX_UNIT_NAME = 80;
-
-const REPORT_ID_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
-const LANGUAGE_PATTERN = /^[A-Za-z]{2,3}(-[A-Za-z0-9]{2,8})?$/;
-
-export function urgencyWeightOf(urgency: ReportUrgency): ReportUrgencyWeight {
-  if (urgency === "critical") return 3;
-  if (urgency === "high") return 2;
-  return 1;
-}
-
-export function dashboardForCategory(category: ReportCategory): ReportDashboard {
-  return category === "medical" ? "medical" : "rescue";
-}
+const MAX_NOTE = REPORT_LIMITS.note;
+const MAX_RESOLUTION_NOTE = REPORT_LIMITS.resolutionNote;
+const MAX_UNIT_NAME = REPORT_LIMITS.unitName;
 
 type Failure = { ok: false; status: 400 | 403 | 404 | 409; error: string };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-/**
- * Trims text, removes control characters (keeps newlines/tabs) and enforces a length range.
- * Returns null when the value is not a string or is out of range.
- */
-export function cleanText(value: unknown, min: number, max: number): string | null {
-  if (typeof value !== "string") return null;
-  const cleaned = value.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, "").trim();
-  if (cleaned.length < min || cleaned.length > max) return null;
-  return cleaned;
-}
-
-// ---------------------------------------------------------------------------
-// Report creation (server fallback for POST /api/reports)
-// ---------------------------------------------------------------------------
-
-export interface ValidatedNewReport {
-  reportId: string | null;
-  category: ReportCategory;
-  urgency: ReportUrgency;
-  description: string;
-  translatedDescription: string | null;
-  originalLanguage: string;
-  isSOS: boolean;
-  location: { lat: number; lng: number; address: string; zone: string };
-  processedBy: ReportProcessor;
-  confidenceScore: number;
-  peopleAffected: number;
-  reportedInjuries: string | null;
-  accessConditions: string | null;
-}
-
-export function validateNewReport(
-  body: unknown
-): { ok: true; value: ValidatedNewReport } | Failure {
-  const bad = (error: string): Failure => ({ ok: false, status: 400, error });
-  if (!isPlainObject(body)) return bad("Request body must be a JSON object.");
-
-  if (typeof body.category !== "string" || !REPORT_CATEGORIES.includes(body.category as ReportCategory)) {
-    return bad(`Invalid or missing category. Must be one of: ${REPORT_CATEGORIES.join(", ")}`);
-  }
-  const category = body.category as ReportCategory;
-
-  if (typeof body.urgency !== "string" || !REPORT_URGENCIES.includes(body.urgency as ReportUrgency)) {
-    return bad(`Invalid or missing urgency. Must be one of: ${REPORT_URGENCIES.join(", ")}`);
-  }
-
-  const isSOS = body.isSOS === true;
-  // An SOS is always critical (same rule as the client).
-  const urgency: ReportUrgency = isSOS ? "critical" : (body.urgency as ReportUrgency);
-
-  const description = cleanText(body.description, 1, MAX_DESCRIPTION);
-  if (!description) return bad(`Description is required (1-${MAX_DESCRIPTION} characters).`);
-
-  let translatedDescription: string | null = null;
-  if (body.translatedDescription !== undefined && body.translatedDescription !== null) {
-    translatedDescription = cleanText(body.translatedDescription, 1, MAX_DESCRIPTION);
-    if (!translatedDescription) return bad("translatedDescription must be 1-1000 characters when provided.");
-  }
-
-  let originalLanguage = "en";
-  if (body.originalLanguage !== undefined && body.originalLanguage !== null) {
-    if (typeof body.originalLanguage !== "string" || !LANGUAGE_PATTERN.test(body.originalLanguage)) {
-      return bad("originalLanguage must be a language code such as 'en' or 'hi'.");
-    }
-    originalLanguage = body.originalLanguage;
-  }
-
-  const loc = body.location;
-  if (
-    !isPlainObject(loc) ||
-    typeof loc.lat !== "number" ||
-    typeof loc.lng !== "number" ||
-    !Number.isFinite(loc.lat) ||
-    !Number.isFinite(loc.lng) ||
-    loc.lat < -90 ||
-    loc.lat > 90 ||
-    loc.lng < -180 ||
-    loc.lng > 180
-  ) {
-    return bad("A valid location with numeric 'lat' (-90..90) and 'lng' (-180..180) is required.");
-  }
-  let address = "";
-  if (loc.address !== undefined && loc.address !== null && loc.address !== "") {
-    const a = cleanText(loc.address, 1, MAX_ADDRESS);
-    if (!a) return bad(`location.address must be at most ${MAX_ADDRESS} characters.`);
-    address = a;
-  }
-  let zone = "";
-  if (loc.zone !== undefined && loc.zone !== null && loc.zone !== "") {
-    const z = cleanText(loc.zone, 1, MAX_ZONE);
-    if (!z) return bad(`location.zone must be at most ${MAX_ZONE} characters.`);
-    zone = z;
-  }
-
-  let reportId: string | null = null;
-  if (body.reportId !== undefined && body.reportId !== null) {
-    if (typeof body.reportId !== "string" || !REPORT_ID_PATTERN.test(body.reportId)) {
-      return bad("reportId must be 8-64 characters: letters, digits, '_' or '-'.");
-    }
-    reportId = body.reportId;
-  }
-
-  // Advisory values from the device. They never grant privileges.
-  const processedBy: ReportProcessor = body.processedBy === "on-device" ? "on-device" : "cloud";
-  const confidenceScore =
-    typeof body.confidenceScore === "number" && Number.isFinite(body.confidenceScore)
-      ? Math.max(0, Math.min(1, body.confidenceScore))
-      : 0.95;
-
-  let peopleAffected = 1;
-  if (body.peopleAffected !== undefined && body.peopleAffected !== null) {
-    if (
-      typeof body.peopleAffected !== "number" ||
-      !Number.isInteger(body.peopleAffected) ||
-      body.peopleAffected < 1 ||
-      body.peopleAffected > 500
-    ) {
-      return bad("peopleAffected must be a whole number between 1 and 500.");
-    }
-    peopleAffected = body.peopleAffected;
-  }
-
-  let reportedInjuries: string | null = null;
-  if (body.reportedInjuries !== undefined && body.reportedInjuries !== null && body.reportedInjuries !== "") {
-    reportedInjuries = cleanText(body.reportedInjuries, 1, MAX_SHORT_TEXT);
-    if (!reportedInjuries) return bad(`reportedInjuries must be at most ${MAX_SHORT_TEXT} characters.`);
-  }
-
-  let accessConditions: string | null = null;
-  if (body.accessConditions !== undefined && body.accessConditions !== null && body.accessConditions !== "") {
-    accessConditions = cleanText(body.accessConditions, 1, MAX_SHORT_TEXT);
-    if (!accessConditions) return bad(`accessConditions must be at most ${MAX_SHORT_TEXT} characters.`);
-  }
-
-  return {
-    ok: true,
-    value: {
-      reportId,
-      category,
-      urgency,
-      description,
-      // Existing behaviour: fall back to the original text. Schema cleanup is planned for T2.
-      translatedDescription: translatedDescription ?? description,
-      originalLanguage,
-      isSOS,
-      location: { lat: loc.lat, lng: loc.lng, address, zone },
-      processedBy,
-      confidenceScore,
-      peopleAffected,
-      reportedInjuries,
-      accessConditions,
-    },
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -238,16 +70,9 @@ export interface ReportActionPlan {
     note: string | null;
     timestamp: string;
   };
-  escalationLog: null | {
-    reportId: string;
+  escalationLog: null | (Omit<EscalationLogEntry, "logId" | "triggeredAt" | "type"> & {
     type: "manual";
-    reason: string;
-    previousUrgency: ReportUrgency;
-    newUrgency: ReportUrgency;
-    actor: string;
-    actorName: string;
-    actorRole: string;
-  };
+  });
 }
 
 function isStatus(value: unknown): value is ReportStatus {

@@ -15,6 +15,14 @@ service cloud.firestore {
     //   (acknowledge, assign, escalate, resolve, dedupe...) is written by the Next.js server
     //   routes with the Admin SDK, which bypasses these rules. Clients cannot update reports.
     // - alerts, resources and escalationLog are written by the server only.
+    // - Citizen-created reports are ALWAYS manual: processedBy == 'manual' and
+    //   confidenceScore == null. A client can never claim that AI ("on-device" / "cloud")
+    //   processed a report. Trusted server code (Admin SDK, bypasses these rules) may record
+    //   other provenance values only when processing has really happened (T3 onwards).
+    // - Allowed values, key lists and limits below mirror lib/constants/report.ts. Rules cannot
+    //   import TypeScript, so tests/schema/constants-rules-drift.test.ts fails if they diverge.
+    // - Anonymous Firebase Auth users are signed-in users with no role claim: they may create and
+    //   read only their own reports, exactly like a citizen.
 
     // ===============================================================
     // Helper Functions
@@ -82,7 +90,7 @@ service cloud.firestore {
           'processedBy', 'confidenceScore', 'status', 'assignedDashboard', 'isDuplicateOf',
           'escalated', 'escalatedAt', 'createdAt', 'syncedAt', 'updatedAt',
           'assignedTeamOrUnit', 'acknowledgedAt', 'resolvedNotes', 'activityTrail',
-          'peopleAffected', 'reportedInjuries'
+          'peopleAffected', 'reportedInjuries', 'accessConditions'
         ])
         && d.keys().hasAll([
           'reportId', 'userId', 'category', 'urgency', 'urgencyWeight', 'description',
@@ -106,10 +114,11 @@ service cloud.firestore {
         && (d.isSOS == false || d.urgency == 'critical')
         && isValidLocation(d.location)
         && d.mediaUrl == null
-        && d.processedBy in ['on-device', 'cloud']
-        && d.confidenceScore is number && d.confidenceScore >= 0 && d.confidenceScore <= 1
+        && d.processedBy == 'manual'
+        && d.confidenceScore == null
         && d.status == 'received'
         && d.assignedDashboard in ['medical', 'rescue']
+        && d.assignedDashboard == (d.category == 'medical' ? 'medical' : 'rescue')
         && d.isDuplicateOf == null
         && d.escalated == false
         && d.escalatedAt == null
@@ -122,7 +131,10 @@ service cloud.firestore {
         && isValidInitialTrail(d.activityTrail)
         && d.peopleAffected is int && d.peopleAffected >= 1 && d.peopleAffected <= 500
         && (d.reportedInjuries == null
-            || (d.reportedInjuries is string && d.reportedInjuries.size() <= 500));
+            || (d.reportedInjuries is string && d.reportedInjuries.size() <= 500))
+        && (!('accessConditions' in d)
+            || d.accessConditions == null
+            || (d.accessConditions is string && d.accessConditions.size() <= 500));
     }
 
     // ===============================================================

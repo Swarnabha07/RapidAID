@@ -111,7 +111,7 @@ export function IncidentDetailPanel({
       <div className="mt-4 rounded-md border-l-2 border-brand-blue bg-brand-blue/10 p-3">
         <div className="flex items-center justify-between">
           <p className="text-[11px] font-semibold uppercase tracking-wide text-brand-blue">
-            AI triage / decision support
+            Triage / decision support
           </p>
           <UrgencyPill value={incident.aiUrgency} />
         </div>
