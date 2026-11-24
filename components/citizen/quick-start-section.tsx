@@ -95,8 +95,6 @@ export function QuickStartSection({
           isSOS: false,
           description: `Citizen emergency request for ${selectedCategoryObj.label}. Logged via Quick Start portal.`,
           location,
-          processedBy: "cloud",
-          confidenceScore: 0.95,
         });
 
         setFeedback(`Request logged! Report #${reportId.slice(0, 8)} created.`);

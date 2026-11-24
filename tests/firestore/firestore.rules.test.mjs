@@ -67,8 +67,8 @@ function validReport(uid = "victim-1", id = "report-1") {
       lng: 88.3639,
     },
     mediaUrl: null,
-    processedBy: "cloud",
-    confidenceScore: 0.95,
+    processedBy: "manual",
+    confidenceScore: null,
     status: "received",
     assignedDashboard: "medical",
     isDuplicateOf: null,
@@ -175,6 +175,124 @@ test("rejects a report that does not start in received status", async () => {
   };
 
   await assertFails(setDoc(doc(user(), "reports/report-status"), report));
+});
+
+test("rejects citizen reports that claim on-device or cloud AI processing", async () => {
+  for (const processedBy of ["on-device", "cloud", "gemini", "", null]) {
+    await assertFails(
+      setDoc(doc(user(), `reports/claim-${String(processedBy)}`), {
+        ...validReport("victim-1", `claim-${String(processedBy)}`),
+        processedBy,
+      }),
+    );
+  }
+});
+
+test("rejects citizen reports with any numeric or non-null confidence score", async () => {
+  for (const confidenceScore of [0, 0.5, 0.95, 1, "0.9"]) {
+    await assertFails(
+      setDoc(doc(user(), `reports/conf-${String(confidenceScore)}`), {
+        ...validReport("victim-1", `conf-${String(confidenceScore)}`),
+        confidenceScore,
+      }),
+    );
+  }
+});
+
+test("rejects citizen reports that omit processedBy or confidenceScore", async () => {
+  const noProcessor = validReport("victim-1", "no-processor");
+  delete noProcessor.processedBy;
+  await assertFails(setDoc(doc(user(), "reports/no-processor"), noProcessor));
+
+  const noConfidence = validReport("victim-1", "no-confidence");
+  delete noConfidence.confidenceScore;
+  await assertFails(setDoc(doc(user(), "reports/no-confidence"), noConfidence));
+});
+
+test("allows a manual SOS report and a rescue-routed report", async () => {
+  await assertSucceeds(
+    setDoc(doc(user(), "reports/sos-ok"), {
+      ...validReport("victim-1", "sos-ok"),
+      isSOS: true,
+      urgency: "critical",
+      urgencyWeight: 3,
+    }),
+  );
+
+  await assertSucceeds(
+    setDoc(doc(user(), "reports/water-ok"), {
+      ...validReport("victim-1", "water-ok"),
+      category: "water",
+      assignedDashboard: "rescue",
+    }),
+  );
+});
+
+test("rejects a report routed to the wrong dashboard for its category", async () => {
+  await assertFails(
+    setDoc(doc(user(), "reports/route-1"), {
+      ...validReport("victim-1", "route-1"),
+      category: "medical",
+      assignedDashboard: "rescue",
+    }),
+  );
+
+  await assertFails(
+    setDoc(doc(user(), "reports/route-2"), {
+      ...validReport("victim-1", "route-2"),
+      category: "shelter",
+      assignedDashboard: "medical",
+    }),
+  );
+});
+
+test("accessConditions is optional, bounded and must be a string or null", async () => {
+  await assertSucceeds(
+    setDoc(doc(user(), "reports/access-1"), {
+      ...validReport("victim-1", "access-1"),
+      accessConditions: "Road flooded; boat access only",
+    }),
+  );
+
+  await assertSucceeds(
+    setDoc(doc(user(), "reports/access-2"), {
+      ...validReport("victim-1", "access-2"),
+      accessConditions: null,
+    }),
+  );
+
+  await assertFails(
+    setDoc(doc(user(), "reports/access-3"), {
+      ...validReport("victim-1", "access-3"),
+      accessConditions: "x".repeat(501),
+    }),
+  );
+
+  await assertFails(
+    setDoc(doc(user(), "reports/access-4"), {
+      ...validReport("victim-1", "access-4"),
+      accessConditions: 42,
+    }),
+  );
+});
+
+test("anonymous users are held to the same manual-provenance rules", async () => {
+  const anonymousDb = testEnv.authenticatedContext("anonymous-guest-9").firestore();
+
+  await assertSucceeds(
+    setDoc(
+      doc(anonymousDb, "reports/anon-manual"),
+      validReport("anonymous-guest-9", "anon-manual"),
+    ),
+  );
+
+  await assertFails(
+    setDoc(doc(anonymousDb, "reports/anon-cloud"), {
+      ...validReport("anonymous-guest-9", "anon-cloud"),
+      processedBy: "cloud",
+      confidenceScore: 0.99,
+    }),
+  );
 });
 
 test("allows the report owner to read their report", async () => {

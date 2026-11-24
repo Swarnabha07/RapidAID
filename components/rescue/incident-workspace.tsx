@@ -92,7 +92,7 @@ export function IncidentWorkspace({
 
       <div className="mt-4 rounded-md border-l-2 border-brand-blue bg-brand-blue/10 p-3">
         <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-brand-blue">
-          <Sparkles size={12} /> AI triage · {incident.aiTriageLabel}
+          <Sparkles size={12} /> Triage · {incident.aiTriageLabel}
         </p>
         <p className="mt-1.5 text-[13px] leading-relaxed text-white/85">
           {incident.aiTriageSummary}

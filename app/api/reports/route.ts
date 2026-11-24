@@ -10,9 +10,9 @@ import {
 } from "@/lib/firebase/server-auth";
 import {
   validateNewReport,
-  urgencyWeightOf,
-  dashboardForCategory,
-} from "@/lib/server/report-security";
+  buildNewReportFields,
+  buildInitialTrailEntry,
+} from "@/lib/validation/report";
 
 const MAX_BODY_BYTES = 20_000;
 
@@ -47,46 +47,23 @@ export async function POST(req: NextRequest) {
     const ref = v.reportId ? col.doc(v.reportId) : col.doc();
     const reportId = ref.id;
 
+    // Same builder as the client path (createReport), so both paths store the same document.
+    // Provenance is always processedBy "manual" / confidenceScore null: a caller cannot claim AI.
     const reportDocument: Record<string, unknown> = {
-      reportId,
-      userId: uid,
-      category: v.category,
-      urgency: v.urgency,
-      urgencyWeight: urgencyWeightOf(v.urgency),
-      description: v.description,
-      translatedDescription: v.translatedDescription,
-      originalLanguage: v.originalLanguage,
-      isSOS: v.isSOS,
-      location: v.location,
-      mediaUrl: null, // uploads are not supported yet; never store caller-supplied URLs
-      processedBy: v.processedBy,
-      confidenceScore: v.confidenceScore,
-      status: "received",
-      assignedDashboard: dashboardForCategory(v.category),
-      isDuplicateOf: null,
-      escalated: false,
-      escalatedAt: null,
-      assignedTeamOrUnit: null,
-      acknowledgedAt: null,
-      resolvedNotes: null,
-      peopleAffected: v.peopleAffected,
-      reportedInjuries: v.reportedInjuries,
+      ...buildNewReportFields(v, { reportId, userId: uid }),
       activityTrail: [
-        {
+        buildInitialTrailEntry({
           id: randomUUID(),
-          action: v.isSOS ? "Emergency SOS Triggered" : "Report Created",
+          isSOS: v.isSOS,
           actorRole: role === "victim" ? "citizen" : role,
-          note: v.isSOS
-            ? "Immediate SOS emergency beacon recorded"
-            : "Report submitted via RapidAID server fallback",
           timestamp: new Date().toISOString(),
-        },
+          viaServerFallback: true,
+        }),
       ],
       createdAt: FieldValue.serverTimestamp(),
       updatedAt: FieldValue.serverTimestamp(),
       syncedAt: FieldValue.serverTimestamp(),
     };
-    if (v.accessConditions) reportDocument.accessConditions = v.accessConditions;
 
     try {
       // create() fails if the document exists, so an existing report can never be overwritten.

@@ -16,27 +16,24 @@ import type {
   SyncState,
   OperationalStatus,
 } from "@/lib/types/citizen-request";
+import type {
+  ReportCategory,
+  ReportUrgency,
+  ReportUrgencyWeight,
+  ReportStatus,
+  ReportDashboard,
+  ReportProcessor,
+} from "@/lib/constants/report";
 
-export type ReportCategory =
-  | "medical"
-  | "water"
-  | "shelter"
-  | "missing_person"
-  | "other";
-
-export type ReportUrgency = "critical" | "high" | "normal";
-
-export type ReportUrgencyWeight = 3 | 2 | 1;
-
-export type ReportStatus =
-  | "received"
-  | "in_progress"
-  | "dispatched"
-  | "resolved";
-
-export type ReportDashboard = "medical" | "rescue";
-
-export type ReportProcessor = "on-device" | "cloud";
+// Canonical enumerations live in lib/constants/report.ts (single source of truth).
+export type {
+  ReportCategory,
+  ReportUrgency,
+  ReportUrgencyWeight,
+  ReportStatus,
+  ReportDashboard,
+  ReportProcessor,
+};
 
 export interface ReportLocation {
   lat: number;
@@ -69,8 +66,14 @@ export interface Report {
   isSOS: boolean;
   location: ReportLocation;
   mediaUrl: string | null;
+  /**
+   * How category/urgency were produced. Citizen-created reports are always "manual" (no AI ran).
+   * "on-device" / "cloud" are written only by trusted processing that really ran (T3+), or exist
+   * on legacy/seed documents. Client-declared values are never trusted as proof of processing.
+   */
   processedBy: ReportProcessor;
-  confidenceScore: number;
+  /** AI confidence 0..1, or null when no AI ran (always null for citizen-created reports). */
+  confidenceScore: number | null;
   status: ReportStatus;
   assignedDashboard: ReportDashboard;
   isDuplicateOf: string | null;
@@ -94,8 +97,12 @@ export interface Report {
   aiTriageSummary?: string | null;
   aiTriageLabel?: string | null;
   priorityConfirmedBy?: string | null;
+  /** Server-managed. Incremented on each escalation; absent until the first one. */
   escalationLevel?: number;
+  /** Server-managed (T6). Set when the report has been through dedupe processing. */
+  processedAt?: Timestamp | string | number | Date | null;
   reviewedBy?: string | null;
+  /** Optional, citizen/responder supplied. Written only when provided. */
   accessConditions?: string | null;
 }
 
@@ -181,6 +188,54 @@ export function formatCategoryLabel(category: ReportCategory | string): string {
     case "other":
     default:
       return "General Assistance";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Truthful display helpers
+// ---------------------------------------------------------------------------
+
+/** Neutral placeholder shown when a report has no stored zone. Nothing is invented. */
+export const ZONE_UNKNOWN_LABEL = "Zone not determined";
+
+/** Shown when no AI summary has been generated and stored on the report. */
+export const NO_AI_SUMMARY_LABEL = "No AI triage summary has been generated for this report.";
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/**
+ * Human-readable location that never throws, even for legacy or partial documents.
+ * Uses the stored address, otherwise the coordinates, otherwise an explicit "unavailable".
+ */
+export function describeLocation(
+  location: Partial<ReportLocation> | null | undefined,
+  style: "coordinates" | "lat-lng" = "coordinates"
+): string {
+  if (location?.address) return location.address;
+  if (location && isFiniteNumber(location.lat) && isFiniteNumber(location.lng)) {
+    return style === "coordinates"
+      ? `Coordinates: ${location.lat.toFixed(4)}, ${location.lng.toFixed(4)}`
+      : `Lat: ${location.lat.toFixed(3)}, Lng: ${location.lng.toFixed(3)}`;
+  }
+  return "Location unavailable";
+}
+
+/**
+ * Truthful description of how a report was processed. It states only what the document records
+ * and never names a model or implies analysis that is not stored on the report.
+ */
+export function describeProcessing(processedBy: ReportProcessor | string | null | undefined): string {
+  switch (processedBy) {
+    case "manual":
+      return "Manual report, no AI processing";
+    case "on-device":
+      return "Processed on the submitting device (as recorded on the report)";
+    case "cloud":
+      return "Processed by cloud AI (as recorded on the report)";
+    default:
+      return "Processing source not recorded";
   }
 }
 
@@ -283,9 +338,7 @@ export function mapReportStatusToCitizenStatus(
 export function mapReportToMedicalIncident(report: Report): Incident {
   const hasTeam = Boolean(report.assignedTeamOrUnit);
   const isAck = Boolean(report.acknowledgedAt || report.acknowledgedBy);
-  const locationLabel =
-    report.location.address ||
-    `Coordinates: ${report.location.lat.toFixed(4)}, ${report.location.lng.toFixed(4)}`;
+  const locationLabel = describeLocation(report.location);
 
   const timeline: MedicalTimelineEntry[] =
     report.activityTrail && report.activityTrail.length > 0
@@ -298,7 +351,7 @@ export function mapReportToMedicalIncident(report: Report): Incident {
           {
             time: formatTimeToHHMMSS(report.createdAt),
             label: "Report received",
-            actor: report.processedBy === "on-device" ? "⚡ On-device Gemini Nano" : "Citizen portal",
+            actor: "Citizen portal",
           },
           ...(report.syncedAt
             ? [
@@ -342,8 +395,8 @@ export function mapReportToMedicalIncident(report: Report): Incident {
     id: report.reportId,
     category: formatCategoryLabel(report.category),
     location: locationLabel,
-    zone: report.location.zone ?? "North District · Sector 1",
-    peopleAffected: report.peopleAffected ?? (report.isSOS ? 1 : 1),
+    zone: report.location?.zone || ZONE_UNKNOWN_LABEL,
+    peopleAffected: report.peopleAffected ?? 1,
     reportedAt: formatTimeToHHMM(report.createdAt),
     reportedAgo: formatTimeToAgo(report.createdAt),
     aiUrgency: mapReportUrgencyToMedical(report.urgency),
@@ -356,15 +409,9 @@ export function mapReportToMedicalIncident(report: Report): Incident {
     status: mapReportStatusToIncidentStatus(report.status, hasTeam),
     citizenReport: report.translatedDescription || report.description,
     citizenReportTime: formatTimeToHHMMSS(report.createdAt),
-    reportedInjuries:
-      report.reportedInjuries ??
-      (report.category === "medical" ? "Medical triage indicated · Field verification pending" : "None reported"),
+    reportedInjuries: report.reportedInjuries ?? "Not reported",
     attachment: report.mediaUrl ?? undefined,
-    aiTriageSummary:
-      report.aiTriageSummary ??
-      (report.processedBy === "on-device"
-        ? "⚡ Triage classified on-device via Gemini Nano 4. Immediate responder review recommended."
-        : "☁ Cloud-enhanced triage inference completed. Cross-referenced against regional reports."),
+    aiTriageSummary: report.aiTriageSummary ?? NO_AI_SUMMARY_LABEL,
     escalationLevel: report.escalationLevel ?? (report.escalated ? 1 : 0),
     acknowledgementOverdueBy: report.escalated ? "Overdue" : undefined,
     timeline,
@@ -377,9 +424,7 @@ export function mapReportToMedicalIncident(report: Report): Incident {
 export function mapReportToRescueIncident(report: Report): RescueIncident {
   const hasUnit = Boolean(report.assignedTeamOrUnit);
   const isAck = Boolean(report.acknowledgedAt || report.acknowledgedBy);
-  const locationLabel =
-    report.location.address ||
-    `Coordinates: ${report.location.lat.toFixed(4)}, ${report.location.lng.toFixed(4)}`;
+  const locationLabel = describeLocation(report.location);
 
   const contextLinks: string[] = [];
   if (report.isSOS) contextLinks.push("⚡ SOS Emergency Flag");
@@ -392,7 +437,7 @@ export function mapReportToRescueIncident(report: Report): RescueIncident {
       ? `SOS: Emergency ${formatCategoryLabel(report.category)}`
       : formatCategoryLabel(report.category),
     location: locationLabel,
-    zone: report.location.zone ?? "North District · Sector N-01",
+    zone: report.location?.zone || ZONE_UNKNOWN_LABEL,
     people: report.peopleAffected ?? 1,
     extra: report.isSOS ? "SOS emergency flag · Immediate action" : `${report.peopleAffected ?? 1} affected`,
     aiUrgency: mapReportUrgencyToRescue(report.urgency),
@@ -404,14 +449,10 @@ export function mapReportToRescueIncident(report: Report): RescueIncident {
     acknowledgedAt: report.acknowledgedAt ? formatTimeToHHMMSS(report.acknowledgedAt) : undefined,
     description: report.translatedDescription || report.description,
     accessConditions: report.accessConditions ?? "Field route access unverified. Confirm with lead before entry.",
-    aiTriageLabel: report.aiTriageLabel ?? `ESTIMATED ${report.urgency.toUpperCase()}`,
-    aiTriageSummary:
-      report.aiTriageSummary ??
-      (report.processedBy === "on-device"
-        ? "⚡ On-device Gemini Nano classified priority offline. Safe access and unit headcount verification needed."
-        : "☁ Cloud Gemini multi-source synthesis. De-duplicated and prioritized across regional reports."),
+    aiTriageLabel: report.aiTriageLabel ?? `REPORTED ${report.urgency.toUpperCase()}`,
+    aiTriageSummary: report.aiTriageSummary ?? NO_AI_SUMMARY_LABEL,
     contextLinks,
-    lastVerified: `Last verified via ${report.processedBy} sync`,
+    lastVerified: `Report source: ${describeProcessing(report.processedBy)}`,
     reviewedBy: report.reviewedBy ?? (report.acknowledgedBy ? `${report.acknowledgedBy} · Reviewed` : "Unreviewed"),
   };
 }
@@ -422,9 +463,7 @@ export function mapReportToRescueIncident(report: Report): RescueIncident {
 export function mapReportToCitizenRequest(report: Report): CitizenRequest {
   const hasTeam = Boolean(report.assignedTeamOrUnit);
   const isAck = Boolean(report.acknowledgedAt || report.acknowledgedBy);
-  const locationLabel =
-    report.location.address ||
-    `Lat: ${report.location.lat.toFixed(3)}, Lng: ${report.location.lng.toFixed(3)}`;
+  const locationLabel = describeLocation(report.location, "lat-lng");
 
   return {
     id: report.reportId,

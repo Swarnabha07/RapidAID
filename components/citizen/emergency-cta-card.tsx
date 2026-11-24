@@ -64,8 +64,6 @@ export function EmergencyCtaCard({
           description:
             "⚡ Emergency Assistance Request: Citizen pressed one-tap SOS beacon. Immediate responder dispatch requested.",
           location,
-          processedBy: "on-device",
-          confidenceScore: 1.0,
         });
 
         setFeedback({
