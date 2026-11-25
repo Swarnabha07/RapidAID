@@ -30,6 +30,8 @@ This isn't hybrid AI as an optimization — it's hybrid AI as the actual feature
 
 Firebase AI Logic is called directly in the client (Web SDK) for on-device inference, with automatic cloud fallback configured through the same SDK when on-device confidence is low or the device doesn't support local inference.
 
+**Implementation status (T3).** The hybrid AI module lives in `lib/ai/` and is advisory only: it returns a validated suggestion (category, urgency, language, optional English translation, an explicitly stated people count, and a model-estimated confidence) that a person must confirm. Chrome's on-device model is tried first for Latin-script text; Bengali, Hindi and other non-Latin text goes to cloud Gemini (`gemini-3.5-flash-lite`, free tier) through Firebase AI Logic, protected by App Check. If AI is unavailable, offline, rate-limited or slow, the manual options always work. Reports are never stored as AI-processed (`processedBy` stays `manual`). The source badge (on-device or cloud) is shown transiently and only reflects what the SDK reports. The free-text report form that uses this module is T4; until then the admin-only `/ai-check` page exercises it. Not a diagnosis. Authorized human review required.
+
 ## 4. Features
 
 ### User App
@@ -123,7 +125,7 @@ npm install
 
 # Set up environment variables
 cp .env.example .env.local
-# Add your Firebase project config + App Check debug token
+# Add your Firebase project config (the App Check debug token is registered in the console, see below)
 
 # Run locally
 npm run dev
@@ -131,6 +133,6 @@ npm run dev
 
 **Firebase project setup required:**
 1. Create a Firebase project, enable Firestore, Authentication, Cloud Messaging, App Check, and Firebase AI Logic (Gemini Developer API or Vertex AI backend).
-2. Enable App Check with a debug token for local development.
-3. Upgrade to the Blaze plan to enable Cloud Functions (required for auto-escalation); usage stays within the free quota at hackathon scale.
-4. Deploy Firestore security rules and Cloud Functions: `firebase deploy`
+2. Enable App Check with the **reCAPTCHA Enterprise** provider (production domain only) and register a debug token for localhost (open `/ai-check` as an admin, click *Get AI suggestion* once and copy the token from the browser console). Enforce App Check for Firebase AI Logic only, never for Firestore or Authentication.
+3. Stay on the **Spark** plan and the Gemini Developer API free tier (no billing account, no Cloud Functions). Auto-escalation uses Next.js server routes plus an external HTTP cron (T6).
+4. Deploy Firestore security rules and indexes from the repo (`firebase deploy --only firestore`).

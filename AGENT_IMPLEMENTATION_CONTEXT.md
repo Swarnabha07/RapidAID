@@ -2,22 +2,23 @@
 
 > Self-contained handover for any future Claude / Codex agent. Read it fully before doing anything.
 > Update it after EVERY implementation iteration: keep earlier decisions, correct anything that became outdated, append progress.
-> Last updated: **2026-11-24, with the T2 (canonical schema) implementation patch. T1 is completed and merged. T3 (AI integration) is the next phase.**
+> Last updated: **2026-11-25, with the T3 (hybrid AI + App Check) implementation patch. T1 and T2 are COMPLETED, merged, deployed and production-smoke-tested (owner-confirmed). T3 is implemented in a patch; T4 (report intake UI) is next.**
 
 ## 0. Handover status at a glance
 
 | Phase | Status |
 |---|---|
 | T1 — Security lockdown | **Completed.** Merged into `main` (`bf723f2`). Owner-confirmed Vercel Preview test and Firestore rules emulator run (see section 7). |
-| T2 — Canonical schema | **Implemented in a patch produced 2026-11-24.** It counts as COMPLETED only after the owner has applied it, run the verification in section 11, and merged it. **A fresh agent must verify the real repository state; do not assume T2 is applied because this file describes it.** |
-| T3 — AI integration | **Next phase. Planning only first; owner approval of the plan is required before any code.** Section 15 is the T3 handover. |
-| T4 onwards | Pending |
+| T2 — Canonical schema | **Completed (owner-confirmed 2026-11-25).** Merged into `main` (PR #5, merge commit `4cf75f0`), pushed, deployed on Vercel; updated Firestore rules and indexes deployed to Firebase; production smoke test passed (existing report/SOS flows work, new reports follow the T2 schema, old reports remain readable). Automated T2 checks the owner reported: TypeScript, 39/39 schema/unit tests, 29/29 rules emulator tests, production build. **T2 is closed: do not reopen or modify it.** |
+| T3 — Hybrid AI + App Check | **Implemented in a patch (2026-11-25, baseline `main@4cf75f0`).** It counts as COMPLETED only after the owner applies it, runs the verification in section 15.7, completes the Firebase/Vercel steps in section 15.8, and merges it. Section 15 is the T3 record. |
+| T4 — Report intake UI | **Next.** Scope and the T3 interface contract are in section 16. **No T4 patch existed in the supplied materials** (section 16). |
+| T5 onwards | Pending |
 
-- Baseline for the T2 patch: GitHub `main` at commit **`f998cd7`** (`fix: connect emergency help buttons to anonymous authentication`).
-- **Anonymous emergency access exists** (added after the first handover): see section 9. Preserve it.
-- **Firestore rules were deployed by the owner through the Firebase Console** after T1 (the repo copy of the rules was unchanged from T1 up to `f998cd7`). The agent cannot read the deployed rules; whether the deployed rules equal the repo rules is **owner-asserted, not verified**. **T2 changes the rules and indexes; they must be redeployed by the owner (section 13).**
+- Baseline for the T3 patch: GitHub `main` at commit **`4cf75f0`** (`Merge pull request #5 from Swarnabha07/feature/t2-canonical-schema`). The supplied source ZIP matched it (compared ignoring CRLF; the ZIP has no `.git` and omits `.env.example`, which exists on `main`).
+- **Anonymous emergency access exists**: see section 9. Preserve it.
+- **Firestore rules and indexes (T2) were deployed by the owner** after merge (owner-confirmed). The agent cannot read the deployed state. **T3 changes neither rules nor indexes.**
 - **Test accounts are retained** (owner decision, section 5). Do **not** delete them or rotate their passwords unless the owner explicitly approves.
-- **AI is NOT implemented.** `lib/firebase/ai.ts` is an unused module (section 15.2). No report in the system has ever been processed by AI.
+- **AI suggestions exist only as a client-side advisory module (T3) with an admin-only diagnostics page.** No report is ever stored as AI-processed: every report is still `processedBy: "manual"`, `confidenceScore: null` (decision D1-A, section 3). The legacy `lib/firebase/ai.ts` was deleted in T3.
 
 ## 1. Global rules for every future agent (prominent — follow all of them)
 
@@ -30,7 +31,7 @@
 7. **Never** commit, push, deploy, change Firebase project settings, alter accounts, or run destructive commands.
 8. Preserve the existing architecture and UI unless the approved scope requires a change. No redesign.
 9. No unnecessary dependencies and no package upgrades. (`@firebase/rules-unit-testing` is an existing devDependency, added by the owner in `39dfc47`; do not add others.)
-10. **Firebase Spark (free) plan only.** No Blaze upgrade, no Cloud Functions, no paid scheduler, no paid services, no Cloud Storage. (Linking billing would also end the Gemini Developer API free tier.)
+10. **Firebase Spark (free) plan only.** No Blaze upgrade, no Cloud Functions, no paid scheduler, no paid services, no Cloud Storage. (Linking billing would also end the Gemini Developer API free tier.) No Gemini API key and no other new secret: Firebase AI Logic uses a Google-managed service account behind the Firebase project, and the web `apiKey` only identifies the project.
 11. **Do not invent** test results, credentials, data, deployment status or features. Never claim a test passed unless it was actually run; say plainly what was NOT run. Separate: *executed by the agent*, *owner-confirmed*, *not run*.
 12. **Never print, request, commit or include** `.env.local`, service-account JSON, private keys, tokens or passwords (in answers, patches or this file).
 13. **No account deletion and no password rotation without explicit owner approval.**
@@ -41,6 +42,7 @@
 18. Any scheduling/automation must be described honestly according to its real reliability and free-tier limits (never claim real-time guarantees that an external free cron cannot give).
 19. Keep demo data simulated; never expose real victim information.
 20. Do not change existing custom claims or Firestore role mirrors unless an audit shows a real mismatch **and** the owner approves the change.
+21. **Never assume the owner approved a deployment, a Firebase Console change, a billing/plan change or a Vercel setting.** State what the owner must do, and wait.
 
 ## 2. Project overview
 
@@ -79,6 +81,15 @@ Key code: `lib/firebase/{config,auth,firestore,ai,messaging,admin,server-auth}.t
 6. `lib/types/alert.ts` was aligned with what `/api/alerts` really writes, without touching the alerts route (T7).
 7. Misleading "AI triage" dashboard labels were replaced with neutral wording.
 
+### T3 decisions (owner-approved, 2026-11-25)
+- **D1 — Option A:** AI gives suggestions only; the person confirms or overrides. Reports stay `processedBy: "manual"` / `confidenceScore: null`. **No AI provenance is stored.** (Option B, a client-declared `aiAssist` block, may be revisited in T4 only together with a rules change.)
+- **Cloud model:** `gemini-3.5-flash-lite` (Gemini Developer API through Firebase AI Logic, free tier). It is listed by the official models page as supporting structured output; free-tier quotas for it were **not verifiable** (see 15.9). Override with `NEXT_PUBLIC_GEMINI_MODEL`.
+- **Diagnostics:** temporary admin-only `/ai-check` page (T4 may remove it).
+- **Legacy module:** `lib/firebase/ai.ts` deleted (it was imported nowhere).
+- **App Check:** standard (not limited-use) tokens; no replay protection yet. Provider = **reCAPTCHA Enterprise** (the handover's earlier "reCAPTCHA provider" meant this). Production domain only; localhost = debug provider; Vercel Previews get no token (manual/on-device only).
+- **Free tier only:** Spark, Gemini free tier, no Blaze, no Cloud Functions, no Gemini API key.
+
+
 ### Audit recommendations (treated as approved unless the owner objects — confirm when each task starts)
 - Escalation (single MVP policy, resolves a documented conflict between the handoff docs): unacknowledged = `status == "received"`; **critical 10 min, high 20 min; 5-minute sweep**; sets `escalated`, `escalatedAt`, `escalationLevel`, high -> critical (weight 3); writes `escalationLog` + activity entry; idempotent via the `escalated` guard. The thresholds now live in `ESCALATION_POLICY` (`lib/constants/report.ts`); T6 must use them and replace the demo thresholds (2/5/10/20) and the non-existent "Medium" level in `escalation-watch.tsx`.
 - SOS with no medical content routes to `rescue`, critical. *(Recommended in the audit; the owner's approval of this specific routing is not separately recorded — reconfirm in T4.)* SOS reports are never auto-merged (rule 17).
@@ -96,9 +107,9 @@ Key code: `lib/firebase/{config,auth,firestore,ai,messaging,admin,server-auth}.t
 | Task | Status |
 |---|---|
 | T1 Security lockdown | **Completed; merged into `main`.** Owner-confirmed Preview test + rules emulator run. |
-| T2 Canonical schema, shared constants/types/validators, indexes, truthful mappers | **Implemented in a patch (baseline `f998cd7`); completed only after the owner applies, verifies and merges it.** |
-| T3 Hybrid AI (official InferenceMode) + App Check | **Next — planning only first** |
-| T4 Report intake UI (text form, SOS fixes, non-blocking submit, pending/synced/failed) | pending |
+| T2 Canonical schema, shared constants/types/validators, indexes, truthful mappers | **Completed; merged (`4cf75f0`), deployed, smoke-tested (owner-confirmed).** |
+| T3 Hybrid AI (official InferenceMode) + App Check | **Implemented in a patch (baseline `4cf75f0`); completed after the owner applies, verifies, configures and merges it (section 15).** |
+| T4 Report intake UI (text form, SOS fixes, non-blocking submit, pending/synced/failed) | **next** (section 16) |
 | T5 Responder actions and dashboards (remove mock fallbacks, surface errors, limits, on-demand summaries) | pending |
 | T6 Process (dedupe) + escalation route/log + real Escalation Watch | pending |
 | T7 Alerts (create form, citizen feed, geoCells, optional FCM) | pending |
@@ -110,6 +121,7 @@ Key code: `lib/firebase/{config,auth,firestore,ai,messaging,admin,server-auth}.t
 - `39dfc47` — feat: support anonymous emergency report submissions (anonymous auth in the two citizen components, `getCurrentLocation`, `firebase.json` anonymous provider, the rules emulator test suite, `firebase.rules-test.json`, the `@firebase/rules-unit-testing` devDependency).
 - `f998cd7` — fix: connect emergency help buttons to anonymous authentication (`components/landing/emergency-help-button.tsx` and the landing navbar/hero/closing CTA). **This was `main` HEAD when T2 was written.**
 - The supplied source ZIP had identical content to `main@f998cd7` (compared ignoring CRLF; the ZIP has no `.git`).
+- `7091a9b` — feat: implement T2 canonical report schema; `4cf75f0` — Merge pull request #5 (`feature/t2-canonical-schema`). **`4cf75f0` was `main` HEAD when the T3 patch was written** (verified from a fresh GitHub clone; the ZIP matched it ignoring CRLF).
 
 ## 5. Test accounts and role audit (owner decision — supersedes the earlier "delete the test accounts" advice)
 
@@ -237,26 +249,42 @@ npx --yes firebase-tools emulators:exec --only firestore --project demo-rapidaid
 ```
 The test file connects to `127.0.0.1:8080` (the port in `firebase.rules-test.json`).
 
+### Verification of the T3 patch — executed by the agent (scratch Linux clone of `main@4cf75f0`, `npm ci`, 2026-11-25)
+- `npx tsc --noEmit` — exit 0 (baseline also 0).
+- `npx --yes tsx --test tests/ai/*.test.ts tests/security/*.test.ts tests/schema/*.test.ts` — **84/84 pass** (the 39 existing tests + 45 new T3 tests: schema 15, App Check 4, classifier 21, provenance guard 5).
+- `npx eslint .` — **29 errors, 10 warnings** (baseline 34/10; the 5 fewer errors come from deleting `lib/firebase/ai.ts`; zero findings in any new T3 file).
+- `npx next build` (dummy public Firebase env) — success; `/ai-check` is prerendered; 12 routes.
+- `git diff --check` — clean.
+- Baseline reproduced first on the untouched clone: tsc 0, 39/39, ESLint 34/10.
+
+### NOT executed by the agent (T3)
+- **Firestore rules emulator (29 tests):** the sandbox cannot download the emulator JAR (host blocked; retried in T3). Rules and indexes are untouched by T3, so the drift test (part of the 39) still guards them; the owner may re-run the command below as a harmless confirmation.
+- **Every live check:** real Gemini/Firebase AI Logic calls, App Check token exchange, reCAPTCHA Enterprise, Chrome's on-device model, Vercel deployment. These need the owner's console setup (15.8) and the manual checklist (15.7).
+
+
 ### General verification loop for every iteration
 `npm ci` -> `npx tsc --noEmit` -> `npx eslint .` (must not exceed 34 errors / 10 warnings; do not add findings) -> `npm run build` (dummy `NEXT_PUBLIC_FIREBASE_*` env if needed) -> `npx --yes tsx --test tests/security/*.test.ts tests/schema/*.test.ts` plus any new tests -> the rules emulator command whenever `firestore.rules` changes -> `git diff --check`. Report honestly what was NOT run.
 
 ## 12. Remaining issues and known limitations
 
-- **T2 is unapplied until the owner applies it; rules/indexes redeploy is a manual owner step** (section 13). The rules change is **stricter**, which creates a transition risk for reports queued offline by an older client bundle (section 13).
+- **T2 rollout is finished (owner-confirmed).** The transition risk for reports queued offline by an older bundle (section 13) is historical for any browser that has since synced.
 - The deployed rules/indexes/claims/App Check state/billing plan were never inspected by an agent.
 - `processedBy` of existing/seed documents may still be `on-device`/`cloud` (legacy); mappers tolerate it, and describe it only as "as recorded on the report".
 - Old test-account passwords are in the public Git history (section 5) — accepted, rotation deferred.
 - Dashboards still fall back to mock `INCIDENTS`; dialogs close as "success" even when the server rejects (T5). Rescue "fire"/"evac" tabs are mock. Maps are visual mocks (no Leaflet). Escalation Watch/ack watch use demo timers and thresholds; `acknowledgementOverdueBy` shows "Overdue" for any escalated report (T5/T6).
 - `GET /api/alerts` is public and returns `createdBy`/`createdByName`; `POST /api/alerts` still accepts a caller-supplied `alertId`/`active`; no alert creation UI, no citizen alert feed (T7).
-- No rate limiting; anonymous report creation is unauthenticated spam-capable beyond the rules' shape checks (App Check in T3).
-- AI: `lib/firebase/ai.ts` is unused; no App Check; no free-text report form (the quick-start card submits a canned description; the SOS card hard-codes category `medical` and a canned description); offline `await setDoc` blocks the UI, and `SyncStatusCard` is a hard-coded "connected / all synchronized" display (T4).
+- No server-side rate limiting; anonymous report creation is unauthenticated spam-capable beyond the rules' shape checks. **T3 adds App Check for AI Logic only** (enforcement is a console step, 15.8); App Check is deliberately NOT enforced for Firestore/Auth (it would break anonymous SOS and offline writes).
+- AI: the T3 module exists but **no UI uses it yet except `/ai-check`**. There is still no free-text report form (the quick-start card submits a canned description; the SOS card hard-codes category `medical` and a canned description); offline `await setDoc` blocks the UI, and `SyncStatusCard` is a hard-coded "connected / all synchronized" display (T4).
 - FCM: `requestPushPermission` is never called, no VAPID key in `.env.example`, a single `fcmToken` per user, and the service worker pins Firebase 10.13 compat while the app uses 13.3 (T7).
 - Seed data uses the legacy schema (numeric `confidenceScore`, `on-device`/`cloud`); the script is intentionally unsafe to run on production (T8).
-- Docs vs code drift: README/documentation claim Gemini Nano 4, Leaflet, shadcn, Framer Motion, next-pwa, Remote Config (T8). The handoff doc's AI function signatures differ from the code.
+- Docs vs code drift: README/documentation claim Gemini Nano 4, Leaflet, shadcn, Framer Motion, next-pwa, Remote Config (T8). The handoff doc's AI function signatures differ from the code. T3 corrected the setup/App Check/AI text in README and documentation.md only where it was wrong or contradicted the free-tier rule; the broader cleanup remains T8.
+- **T3 limits to remember:** on-device Gemini Nano accepts only a few Latin-script languages (declared as English here); Bengali/Hindi/any non-Latin text is routed to cloud deterministically. On-device needs desktop Chrome with enough disk/GPU/RAM and a user-gesture download; phones get cloud or manual only. Confidence is model-estimated and uncalibrated. Free-tier quotas for `gemini-3.5-flash-lite` and Google's free-tier data-use terms were not verifiable; assume report text sent to the cloud on the free tier may be used by Google to improve its products (verify) and keep demo data simulated.
 - Cosmetic: `tests/firestore/firestore.rules.test.mjs` and `firebase.rules-test.json` start with a UTF-8 BOM (left as is).
 - The hackathon submission deadline was never verified — the owner should check Devpost.
 
-## 13. T2 manual rollout (owner steps; nothing was deployed by any agent)
+## 13. T2 manual rollout — DONE (owner-confirmed 2026-11-25); kept for history
+
+> The owner completed these steps: code on Vercel, rules and indexes deployed, production smoke test passed. Do not repeat them. The text below is the original procedure.
 
 1. Apply the patch on a branch, run the verification loop (section 11) **including the rules emulator command**, merge via the normal Git workflow.
 2. **Order:** deploy the code (Vercel) first, then publish the new `firestore.rules`, then the indexes. Reason: new code sends `processedBy: "manual"` / `confidenceScore: null`, which the *old* rules reject (the server fallback would still save the report); old code sends `"cloud"`/`"on-device"`, which the *new* rules reject. Keep the gap between the code deploy and the rules publish short.
@@ -267,25 +295,123 @@ The test file connects to `127.0.0.1:8080` (the port in `firebase.rules-test.jso
 ## 14. Implementation roadmap
 
 ### Five-day plan (dependency-ordered; prioritise working end-to-end features over extras)
-- Day 1 — Security foundation (T1, done) and schema (T2).
-- Day 2 — Report intake: App Check and hybrid AI module (T3), text report form, non-blocking `createReport`, truthful badges, SOS fixes (T4).
-- Day 3 — Responder side: actions via server routes, remove mock fallbacks and surface errors, queue limits, on-demand cloud summaries (T5).
-- Day 4 — Automation: process route (dedupe), escalation cron and log, real Escalation Watch, service worker for the app shell (T6, start of T8).
-- Day 5 — Alerts and polish: alert form and feed, optional FCM, update seed and docs, end-to-end test in desktop Chrome with Nano plus offline mode, demo script (T7, T8). Day 5 is also the buffer.
+- **Day 1 — Security foundation:** T1 security lockdown (done) and T2 canonical schema (done).
+- **Day 2 — Report intake:** T3 App Check and hybrid AI module (implemented in a patch), then T4 report intake UI (text form, non-blocking `createReport`, truthful badges, SOS fixes).
+- **Day 3 — Responder side:** T5 actions via server routes, remove mock fallbacks and surface errors, queue limits, on-demand cloud summaries.
+- **Day 4 — Automation:** T6 process (dedupe) and escalation route/log, real Escalation Watch; start of T8 (service worker for the app shell).
+- **Day 5 — Alerts and polish/buffer:** T7 alert form and feed, optional FCM; T8 seed and docs alignment, end-to-end test in desktop Chrome with Nano plus offline mode, demo script. Day 5 is also the buffer.
 - **If days run short, cut in this order:** 1. FCM push. 2. Voice note. 3. PWA shell polish. 4. Summaries beyond critical reports.
 - *(Calendar days are indicative; the hackathon deadline was not verified.)*
+- Phase sequence: T1 Security lockdown (complete) -> T2 Canonical schema (complete) -> **T3 Hybrid AI and App Check (implemented in a patch)** -> T4 Report intake UI (next) -> T5 Responder actions and dashboards -> T6 Process and escalation -> T7 Alerts -> T8 Offline shell and docs.
 
 ### Iterations — one prompt and one patch each
 **T1 — Security lockdown** — *Completed (section 7).*
-**T2 — Canonical schema** — *Implemented in a patch (section 10); completed after the owner applies, verifies and merges it.*
-**T3 — Hybrid AI and App Check** — *Next. Full handover in section 15.*
-**T4 — Report intake UI** — text report form (description, language, category, people affected, injuries, optional accessConditions); correct SOS category and location handling; non-blocking offline-first submission (do not `await` server acknowledgement; use snapshot `hasPendingWrites` for pending/synced); clear pending, synced and failed states; truthful AI processing indicators; remove hard-coded "connected/synchronized" wording; preserve the existing design. Depends on T2, T3. Keep the Firestore-client create path and rules; update the rules' create shape in lock-step if the payload changes.
+**T2 — Canonical schema** — *Completed, merged, deployed, smoke-tested (section 13).*
+**T3 — Hybrid AI and App Check** — *Implemented in a patch (2026-11-25); record in section 15; completed after the owner applies, verifies, configures and merges it.*
+**T4 — Report intake UI** — text report form (description, language, category, people affected, injuries, optional accessConditions); correct SOS category and location handling; non-blocking offline-first submission (do not `await` server acknowledgement; use snapshot `hasPendingWrites` for pending/synced); clear pending, synced and failed states; truthful AI processing indicators; remove hard-coded "connected/synchronized" wording; preserve the existing design. Depends on T2, T3. Keep the Firestore-client create path and rules; update the rules' create shape in lock-step if the payload changes. *Next. Scope, deliverables and the T3 interface contract: section 16.*
 **T5 — Responder actions and dashboards** — real data only (remove mock `INCIDENTS` fallbacks and simulated operational data), surface action failures instead of showing success, queue limits (`limit(100)`) and filters (hide duplicates), on-demand cloud summaries only when justified and within free-tier limits, role-based access enforced server-side. Depends on T1, T2, T3. Do not weaken the T1 server checks.
 **T6 — Process and escalation** — secure process/dedupe route (same category, <=30 min, <=0.5 km; `processedAt` guard; transaction; atomic `peopleAffected` increment; audit trail; **SOS never auto-merged**; human review for uncertain duplicates); escalation route + auditable `escalationLog` (`type:"auto"`, actor `system_timeout`); real Escalation Watch driven by `ESCALATION_POLICY`; scheduled execution only if a genuine secure free-tier mechanism exists. Depends on T2 (constants, indexes), T5. Any cron route needs a secret and an honest description (Vercel Hobby cron limits were not verified).
 **T7 — Alerts** — alert creation form; citizen feed (Firestore listener on unexpired alerts, works from cache); `geoCells` (coarse cells + exact Haversine, radius cap 25 km); optional FCM; alert writes via `POST /api/alerts`; harden the public GET and caller-supplied `alertId`/`active`. No claim that anyone was notified unless delivery is confirmed.
-**T8 — Offline shell and documentation** — minimal service worker + manifest (no new package; cache only safe static assets; never private API/auth/user responses); update the seed script to the canonical schema (still dev-project-only); correct README/documentation; demo checklist; desktop-Chrome end-to-end run with Nano and offline sync recovery.
+**T8 — Offline shell and documentation** — minimal service worker + manifest (no new package; cache only safe static assets; never private API/auth/user responses); update the seed script to the canonical schema (still dev-project-only); correct README/documentation; demo checklist; desktop-Chrome end-to-end run with Nano and offline sync recovery. *T8 is the later offline-shell/PWA and documentation phase; it stays separate from T3 and T4, and PWA polish is on the cut list above.*
 
-## 15. T3 — AI integration: handover for the next agent
+## 15. T3 — Hybrid AI and App Check: what the patch implements
+
+### 15.1 Objective and result
+A client-side, **advisory-only** classifier for free-text reports using Firebase AI Logic hybrid inference (on-device Gemini Nano first, Gemini Developer API free tier as fallback), App Check for the cloud path, strict validation of model output against the T2 enums, and an admin-only diagnostics page. It writes **nothing** to Firestore and cannot set `processedBy`/`confidenceScore` (a source-scan test enforces this). The T4 form will consume it.
+
+### 15.2 Files (baseline `main@4cf75f0`)
+| Action | File | Responsibility |
+|---|---|---|
+| new | `lib/constants/ai.ts` | No-import constants: default model, `resolveModelName`, 0.8 retry threshold, timeouts (10 s attempt / 15 s overall), 3 s cooldown, input cap (mirrors `REPORT_LIMITS`), disclaimer and notice strings. |
+| new | `lib/ai/types.ts` | `AiSuggestion`, `ClassifyOutcome`, failure codes + neutral messages, `OnDeviceAvailability`, `UrgencyChange`. |
+| new | `lib/ai/schema.ts` | Pure/SDK-free: one JSON Schema (used by Chrome `responseConstraint` and cloud `responseJsonSchema`), prompt builder, `parseAiResponse` (strict, unknown keys dropped), `needsCloudInference` (script routing), `explicitCountAppearsInText`, `mapInferenceSource`, `urgencyChange`. |
+| new | `lib/ai/classify-report.ts` | The only module that imports `firebase/ai` (lazily): `createClassifier(runtime)` (testable seam), `classifyReportText`, `prepareOnDeviceModel`, `cancelClassification`, `getOnDeviceAvailability`, `preloadAiSdk`, `mapAiError`. |
+| new | `lib/firebase/app-check.ts` | `ensureAppCheck()` (lazy, idempotent, never throws), `resolveAppCheckMode`, `describeAppCheckConfig`. No static import of `config.ts`. |
+| new | `components/ai/ai-check-panel.tsx`, `app/ai-check/page.tsx`, `app/ai-check/layout.tsx` | Temporary admin-only diagnostics (`RoleGate allowedRoles={["admin"]}`, `noindex`). |
+| new | `tests/ai/schema.test.ts`, `app-check.test.ts`, `classify-report.test.ts`, `provenance-guard.test.ts` | 45 tests, SDK mocked, no network. |
+| modified | `.env.example`, `README.md`, `documentation.md`, this file | Config and docs only. |
+| deleted | `lib/firebase/ai.ts` | Was imported nowhere; legacy `window.ai` path, no validation, 5 ESLint `any` errors. |
+| untouched | `firestore.rules`, `firestore.indexes.json`, `lib/constants/report.ts`, `lib/validation/report.ts`, `lib/firebase/{config,auth,firestore}.ts`, API routes, `package.json` | T2 and the rest stay closed. No dependency added or upgraded. |
+
+### 15.3 Request architecture
+- `getAI(app, { backend: new GoogleAIBackend() })` (Gemini Developer API, Spark-compatible, no API key). Standard App Check tokens (decision D1/App Check, section 3).
+- Three model kinds from the same configuration: `hybrid` (`PREFER_ON_DEVICE`), `on-device` (`ONLY_ON_DEVICE`, used when cloud is not allowed), `cloud` (`ONLY_IN_CLOUD`). Cloud config: `responseMimeType: application/json`, `responseJsonSchema`, temperature 0.1, 1024 max output tokens, SDK timeout 10 s. On-device config: text-only English `expectedInputs/Outputs` (avoids the multimodal Chrome flag) and `responseConstraint`.
+- **One prompt string, no `systemInstruction`** (the on-device adapter ignores it). Report text is delimited, marker-injection stripped, and declared untrusted.
+- **Language routing (deterministic):** any character outside Latin/Common/Inherited scripts (Bengali, Hindi, Arabic, Japanese, ...) goes straight to cloud. Latin-script text, including transliterated Bengali/Hindi, may run on-device; the low-confidence retry covers poor results.
+- **Flow:** ensure App Check -> pick kind (cloud-only if non-Latin; `hybrid` if online and App Check ready; else `on-device` only, so **no cloud request is ever attempted without App Check or while offline**) -> parse/validate -> if on-device and confidence < 0.8 and cloud allowed, retry once in cloud (a failed retry keeps the on-device answer flagged `lowConfidence`). A hybrid failure of kind `invalid-output`/`ai-unavailable` is retried once in cloud; 401/403/429 and timeouts are never retried.
+- **Source** comes only from the SDK `inferenceSource` (`on_device` -> `on-device`, `in_cloud` -> `cloud`); a missing/unknown source is a failure, never a guess. The badge is transient and never stored.
+- **Timeouts/cancel:** cloud calls get an `AbortSignal`; on-device calls are raced against the timeout (the SDK does not abort them) and late results are discarded by a generation counter. One request in flight; a newer request supersedes the older; 3 s cooldown against double taps (courtesy only, **not** a security control).
+- **Failure codes** (neutral messages, manual pickers always still work): `empty-input`, `cooldown`, `offline`, `ai-unavailable`, `access-denied` (401/403), `rate-limited` (429), `timeout`, `invalid-output`, `cancelled`. HTTP failures arrive from the SDK as `fetch-error` with `customErrorData.status` (verified in source).
+
+### 15.4 Safety rules implemented (and required of T4)
+1. **No invented headcounts:** the schema field is `peopleAffectedStated` (0 = not stated). The parser keeps it only if the number really appears in the report text (digits in Latin/Bengali/Devanagari/Arabic-Indic scripts, or an English number word up to twenty); otherwise `null`. This is a plausibility guard, not proof; the person still confirms. There is deliberately **no injuries field**: AI never estimates injuries.
+2. **Urgency is never silently lowered:** `urgencyChange(current, suggested)` returns `none-selected | same | raise | lower`. A `lower` result must not be applied without a separate, deliberate confirmation (the diagnostics page demonstrates the warning).
+3. **AI never runs for one-tap SOS** (no text; urgency fixed at critical). The module has no SOS entry point; T4 must not add one.
+4. **Every suggestion needs explicit confirmation;** nothing is saved by the module. The source badge is transient; never claim AI processed a report the person confirmed manually (the report is `manual`).
+5. Disclaimer kept: "Not a diagnosis. Authorized human review required." (`AI_DISCLAIMER`).
+6. Only the description text is sent (no uid, name, email, location); report text is never logged; error logging uses codes only.
+
+### 15.5 App Check design and ordering
+- **Ordering is verified in the SDK:** `AIService` captures the App Check instance once at `getAI()` creation, so `ensureAppCheck()` runs before the first `getAI()` (inside the runtime's model factory). Initialisation is **lazy** (first AI use), so the landing page, anonymous SOS and offline writes never depend on the reCAPTCHA script. Firestore/Auth are created earlier in `config.ts` and are unchanged; they do not require App Check (not enforced), so offline writes, Auth and SOS are unaffected.
+- `resolveAppCheckMode`: localhost/127.0.0.1/[::1] in a **non-production build** -> debug provider (`FIREBASE_APPCHECK_DEBUG_TOKEN = true`, token printed once in the DevTools console); otherwise reCAPTCHA Enterprise **only if** `NEXT_PUBLIC_APPCHECK_RECAPTCHA_SITE_KEY` is set; else App Check stays off and cloud calls are refused. A production build served on localhost (`next start`) uses the site key and will fail on localhost by design.
+- The installed App Check 0.13.1 has no `DebugProvider` export (newer docs snippets use one), so the supported flag is used; no upgrade.
+- Enforcement is a **console** setting for "Firebase AI Logic" only. **Never enforce App Check for Firestore or Authentication.**
+
+### 15.6 Environment variables
+| Variable | Local `.env.local` | Vercel | Notes |
+|---|---|---|---|
+| `NEXT_PUBLIC_GEMINI_MODEL` | optional | optional | Default `gemini-3.5-flash-lite`; shape-validated (`gemini-...`), invalid falls back to the default. |
+| `NEXT_PUBLIC_APPCHECK_RECAPTCHA_SITE_KEY` | leave empty (debug provider) | Production (and only environments whose domain is allowed on the key) | reCAPTCHA Enterprise **site** key, public by design. Not a Gemini key. |
+
+`NEXT_PUBLIC_*` values are inlined at build time: **redeploy Vercel after adding or changing them.** No secrets, no server variables, no Gemini API key.
+
+### 15.7 T3 verification checklist
+**Agent-executed:** section 11 (tsc, 84/84 unit tests, ESLint 29/10, build, diff check).
+**Owner, after applying the patch (PowerShell, repo root):**
+```powershell
+npx tsc --noEmit
+npx --yes tsx --test tests/ai/*.test.ts tests/security/*.test.ts tests/schema/*.test.ts
+npx eslint .
+npm run build
+git diff --check
+```
+Expected: tsc silent; **84 tests pass**; ESLint at most 34 errors / 10 warnings (the patch gives 29/10); build succeeds and lists `/ai-check`. Optionally re-run the rules emulator command (section 11); rules are unchanged.
+**Manual (owner; record exactly what was and was not exercised):**
+- [ ] Localhost (`npm run dev`), sign in as the **admin** test account, open `/ai-check`, type a sentence and click *Get AI suggestion* once. App Check initialises lazily on that first request, so the debug token is printed in the DevTools console only then; copy and register it (15.8 step 4), then run again (the first cloud attempt fails with `access-denied` until it is registered). A non-admin account must not see the page.
+- [ ] English text: a suggestion appears with a source badge. Note the Chrome version and whether the source says on-device or cloud.
+- [ ] A Bengali and a Hindi sentence: source must be **cloud**.
+- [ ] "5 people are trapped" gives people stated = 5; "several people" gives not stated.
+- [ ] Choose urgency "critical" and test a mild text: if AI suggests lower, the warning appears and nothing is applied.
+- [ ] DevTools -> Network -> Offline: neutral failure message (or on-device result for Latin text); the rest of the app still works. SOS from the landing page still works offline/online.
+- [ ] Production (after 15.8): same on the Vercel domain; App Check metrics show verified requests.
+- [ ] A phone: cloud or manual only (Chrome on-device is desktop-only per the docs).
+- [ ] Confirm no new document is created in Firestore by `/ai-check`, and the next real report is still `processedBy: "manual"`.
+
+### 15.8 Remaining Firebase Console / local / Vercel steps (owner; none was done by the agent)
+1. **AI Logic:** Firebase Console -> AI Services -> AI Logic: confirm setup was completed with the **Gemini Developer API** and the Firebase AI Logic and Gemini Developer APIs are enabled; project stays on **Spark** (no billing account).
+2. **reCAPTCHA Enterprise key:** Google Cloud: enable the reCAPTCHA Enterprise API; create a **Website**, score-based key for the **production domain only** (e.g. `rapid-aid-two.vercel.app`). Never add `localhost`; never add bare `vercel.app`.
+3. **Register the web app** in Firebase Console -> App Check -> Apps with the **reCAPTCHA Enterprise** provider and that key.
+4. **Debug token (localhost):** run the dev server, open `/ai-check` as admin, click *Get AI suggestion* once (App Check starts lazily on first use), copy the token logged in the console, add it in App Check -> Manage debug tokens. Keep it private and uncommitted.
+5. **API key restrictions:** Google Cloud -> APIs & Services -> Credentials: if the browser API key has an API allow-list, it must include the **Firebase AI Logic API** and the **Firebase App Check API**. (Current state was never inspected; a 403 `access-denied` is the symptom.)
+6. **Vercel:** add `NEXT_PUBLIC_APPCHECK_RECAPTCHA_SITE_KEY` for Production, redeploy. Preview deployments (random domains) get no App Check token, so there AI is on-device/manual only unless you add that exact preview domain to the key.
+7. **Enforcement:** App Check -> APIs: the docs say AI Logic enforcement is mandatory from 2 Nov 2026 and may already be on; keep it on and confirm *verified* requests after deployment. **Do NOT enforce Cloud Firestore or Authentication.**
+8. **Model quota:** check the free-tier limits for `gemini-3.5-flash-lite` in Google AI Studio (not verifiable by the agent).
+9. Optional later: "authenticated-users mode" (project-wide; anonymous users count as authenticated); limited-use tokens/replay protection (consumes a reCAPTCHA assessment per request). Not part of T3.
+
+Deployment order: merge/apply patch -> console steps 1-5 (safe before deploy: nothing calls AI yet) -> add Vercel variable and deploy -> verify (15.7) -> confirm enforcement (step 7). No rules or index deploy is needed, so there is no offline-queue transition risk.
+
+### 15.9 Free tier, costs and unverified items
+- Compatible and free: Spark, Gemini Developer API free tier (no billing account linked), App Check with reCAPTCHA Enterprise (free up to 10,000 assessments per month without billing, per Google's documentation as read in T3), client-side Firebase AI Logic. Nothing in T3 requires Blaze, Cloud Functions, a paid model, Cloud Storage or a Gemini key. Linking billing would end the free tier: do not.
+- **Not verifiable by the agent (re-check):** current free-tier requests-per-minute/day for `gemini-3.5-flash-lite` (a third-party blog suggested 15 RPM / 500 RPD; unofficial); Google's free-tier data-use terms for submitted content; the exact Chrome version/hardware requirements (the docs read in T3 said desktop Chrome with about 22 GB free disk and a GPU with more than 4 GB VRAM or a CPU with 16 GB RAM; flags may be needed on some versions); whether older 3.x Flash models are being retired (the docs flagged it). `firebase.google.com` blocked automated fetching, so official pages were read through search excerpts plus the installed SDK typings and source.
+- 429s are handled and never retried in a loop; the per-user rate limit is Firebase's default (not changed).
+
+### 15.10 Corrections made to earlier assumptions
+App Check provider = reCAPTCHA Enterprise; model default replaced (old default is not on the structured-output list); the on-device adapter ignores `systemInstruction` and does not abort; a runtime on-device failure does not auto-fall-back in `PREFER_ON_DEVICE`; Chrome's on-device model does not accept Bengali/Hindi; HTTP errors surface as `fetch-error` + status.
+
+
+## 15A. T3 planning handover (HISTORICAL — written before implementation; superseded where section 15 or its corrections say otherwise)
+
+> **Superseded points:** (1) provenance decision D1 is resolved as Option A (section 3); (2) the App Check provider is reCAPTCHA **Enterprise**, not v3; (3) the model is `gemini-3.5-flash-lite`, not `gemini-3.5-flash`/`gemini-3.5-pro`; (4) `lib/firebase/ai.ts` is deleted; (5) the "T3 is PLANNING ONLY" banner below is no longer current. Everything else is kept as the record of what was verified before coding.
 
 > **T3 is PLANNING ONLY until the owner approves your plan. Do not write T3 code first.** The items below record what is verified and what is open, so you do not need to repeat earlier investigations.
 
@@ -355,20 +481,33 @@ T3 = AI module, App Check, provenance handling and its schema/rules/test consequ
 5. **Wait for the owner's explicit approval** before writing implementation code. After approval return **one consolidated unified diff patch** (including the re-created handover).
 6. Never edit the owner's repository directly; never commit, push, merge or deploy without explicit permission.
 
-## 16. T3 readiness and remaining work
+## 16. T4 — Report intake UI: readiness and handover
 
 | Phase | Status |
 |---|---|
-| T1 — Security lockdown | Completed (merged; owner-confirmed Preview test and rules emulator run) |
-| T2 — Canonical schema | Implemented in a patch; completed after owner application, verification (including the rules emulator suite) and merge |
-| T3 — AI integration | Next phase; planning and approval required |
-| T4 onwards | Pending |
+| T1 — Security lockdown | Completed (merged) |
+| T2 — Canonical schema | Completed (merged `4cf75f0`, deployed, smoke-tested) |
+| T3 — Hybrid AI and App Check | Implemented in a patch; completed after the owner applies, verifies, configures (15.8) and merges it |
+| T4 — Report intake UI | **Next** |
+| T5 onwards | Pending |
 
-- **What T2 makes possible for T3:** one canonical enum/limit set to validate AI output against; a shared browser-safe validator/builder; the provenance fields (`processedBy` incl. `manual`, nullable `confidenceScore`, `processedAt`) and truthful mappers that already render stored AI summaries/labels without inventing any; a drift test that protects rules/constants consistency; a rules emulator suite to extend.
-- **What T3 still needs to implement:** the real hybrid AI module (`InferenceMode`, `initializeDeviceModel`, `inferenceSource`), structured output with validation, App Check, failure/timeout handling, the provenance design (D1) with any rules/schema/test changes, and the `.env.example` additions that are genuinely required.
-- **Known blockers / prerequisites:** the owner must apply and verify T2 and run the rules emulator suite; redeploy the rules and indexes (section 13); official-documentation verification (models, quotas, App Check enforcement, Chrome support); owner console actions for App Check.
-- **Decisions needing the owner's approval (T3):** D1 (where and how AI provenance is stored); model identifier and free-tier limits after verification; App Check provider/key and when to enforce it in the console; whether any post-sync enrichment is wanted; any server-held model key (option C).
-- **Deliberately deferred:** report form and non-blocking submit (T4); dashboard data/summaries/mock removal and the "Overdue" label (T5); dedupe/escalation and the `processedAt`/`escalationLevel` semantics (T6); alerts and `geoCells`/`geoCell` (T7); PWA shell, seed and docs alignment (T8); rotating the old test passwords and account linking for anonymous users (owner decision).
+### 16.1 T4 scope (not started)
+Citizen report intake UI on `/home`: a **free-text report form** (description, language, category, people affected, injuries, optional `accessConditions`); location and affected-person details; **integration of the T3 AI suggestions** (optional, non-blocking) with **explicit human confirmation**; **translation** (`translatedDescription`, from the confirmed suggestion only); **SOS kept separate** (one-tap SOS: correct category/location handling, never any AI, never auto-deduplicated); non-blocking offline-first submission (do not `await` server acknowledgement; use snapshot `hasPendingWrites`); clear pending/synced/failed states; replace the hard-coded "connected / all synchronized" `SyncStatusCard` text; truthful processing indicators. The T4 line in section 14 has the full wording.
+
+### 16.2 T3 interface contract T4 must use
+- `classifyReportText(description, { signal? })` -> `ClassifyOutcome` (`lib/ai/classify-report.ts`). One call per user action (for example an "Get AI suggestion" button), never before submit, never awaited by submit; call `cancelClassification()` when the user submits or edits.
+- `prepareOnDeviceModel(onProgress?)` only from a click handler; `getOnDeviceAvailability()` for a status line; `preloadAiSdk()` on mount of the form.
+- Show `AI_FAILURE_MESSAGES[code]` on failure and keep the manual pickers working; show `AI_SUGGESTION_NOTICE` and `AI_DISCLAIMER`.
+- Prefill nothing without confirmation. Apply `peopleAffectedStated` only when non-null and confirmed (otherwise leave the user's/default value). Apply `translation` to `translatedDescription` only when confirmed. Use `urgencyChange(selected, suggestion.urgency)`: never lower silently.
+- The badge (`source`, `lowConfidence`, `retriedInCloud`) is transient UI state. **Never** put it into the created document; `createReport`/`buildNewReportFields` already force `processedBy: "manual"` and `confidenceScore: null`.
+- Do not call the AI module for the SOS cards.
+- Decide in T4's plan whether `/ai-check` is removed or kept admin-only.
+
+### 16.3 T4 patch status and application order
+**No T4 implementation patch was found** in the T3 handover materials (the uploaded files were this document and the project ZIP; the GitHub repository has no T4 branch or patch). Therefore no `T4_IMPLEMENTATION_UPDATED.patch` was produced in the T3 iteration, and nothing was invented. If the owner has an earlier T4 patch, it must be supplied; it must then be re-based on T3 and adjusted to 16.2. **Required order:** apply and merge T3 (and complete 15.8) first, then T4. T4 depends on T3's `lib/ai/*`, `lib/firebase/app-check.ts` and `lib/constants/ai.ts`.
+
+### 16.4 Still open / deferred
+Owner decisions: removal of `/ai-check`; whether to enable authenticated-users mode or replay protection later; Option B provenance (needs a rules change, so only with T4's payload). Deferred: dashboard data/summaries/mock removal (T5); dedupe/escalation (T6); alerts and `geoCells` (T7); PWA shell, seed and docs alignment (T8); rotating the old test passwords and account linking for anonymous users (owner decision).
 
 ## 17. Notes for the next agent
 
@@ -378,3 +517,21 @@ T3 = AI module, App Check, provenance handling and its schema/rules/test consequ
 - Avoid `pkill -f` patterns that can match your own shell command line (this killed a shell once during T1).
 - The sandbox used by previous agents could `npm ci`, run `tsc`, `eslint`, `next build` and `tsx --test`, and could install `firebase-tools`, but could NOT download the Firestore emulator JAR (blocked host) and could read GitHub only through `git clone` (the REST API and the fetch tool were rate-limited).
 - Information in this document that could not be verified is marked as such. If you find a conflict between this file and the repository, record both facts and ask the owner instead of silently choosing.
+
+
+## 18. How to work with the owner
+
+- Concise explanations, **one step at a time**, and exact **Windows PowerShell** commands with a plain-language note on consequences.
+- **Minimum necessary changes**; preserve existing architecture and UI; no redesign.
+- **One implementation task per prompt**, one consolidated **unified patch** for manual application (LF patches; the owner's tree is CRLF, so apply with `git apply --ignore-whitespace`; check first with `--check`).
+- Plan first and wait for approval, unless the owner has explicitly approved implementation.
+- Never commit, push, deploy or change Firebase Console/Vercel/billing settings; **never assume** the owner approved any of them. List the steps for the owner instead.
+- Report test results honestly: *executed by the agent*, *owner-confirmed*, *not run*.
+
+## 19. Project prerequisites, configuration and deployment (consolidated)
+
+- **Stack:** Next.js 16.4 (Cache Components enabled; read `AGENTS.md` and `node_modules/next/dist/docs/` before Next code), React 19, Firebase JS SDK 13.3 (`@firebase/ai` 3.1, `@firebase/app-check` 0.13), Firebase Admin on Vercel server routes, Tailwind. No test runner dependency: tests run with `npx --yes tsx --test ...`; rules tests use `@firebase/rules-unit-testing`.
+- **Plan restrictions:** Firebase **Spark** only; Gemini Developer API **free tier** only; no Blaze/billing, Cloud Functions, paid models or services, Cloud Storage, or Gemini API key.
+- **Environment (`.env.example`):** `NEXT_PUBLIC_FIREBASE_*` (public web config); `NEXT_PUBLIC_GEMINI_MODEL`; `NEXT_PUBLIC_APPCHECK_RECAPTCHA_SITE_KEY`; server-only `FIREBASE_SERVICE_ACCOUNT_KEY` or `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY` (Vercel / `.env.local`, never `NEXT_PUBLIC_`). Redeploy Vercel after any `NEXT_PUBLIC_*` change.
+- **Firebase Console prerequisites:** Firestore, Authentication (email, Google, **anonymous**), AI Logic (Gemini Developer API), App Check (reCAPTCHA Enterprise web app + debug token for localhost; enforce for AI Logic only), published Firestore rules and indexes from the repo (T2, deployed). Elevated roles only via `scripts/set-role.mjs` (section 5).
+- **Deployment steps:** apply patch on a branch -> verification loop (section 11 and 15.7) -> owner console steps (15.8) -> Vercel env + deploy -> smoke test -> merge. Rules/index changes (when a future task has them) follow the order in section 13.
