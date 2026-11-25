@@ -251,9 +251,16 @@ NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_project_id
 NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=your_project.firebasestorage.app
 NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
 NEXT_PUBLIC_FIREBASE_APP_ID=your_app_id
+
+# AI (T3): cloud model used when on-device Gemini Nano is unavailable (free tier)
+NEXT_PUBLIC_GEMINI_MODEL=gemini-3.5-flash-lite
+
+# App Check (T3): reCAPTCHA Enterprise SITE key for the production domain only.
+# Leave empty on localhost: the App Check debug provider is used there.
+NEXT_PUBLIC_APPCHECK_RECAPTCHA_SITE_KEY=
 ```
 
-Add any additional environment variables required by your implementation.
+No Gemini API key is used. Firebase AI Logic calls go through your Firebase project (Spark plan, Gemini Developer API free tier). Server-only Admin credentials are described in `.env.example`. `NEXT_PUBLIC_*` values are inlined at build time, so redeploy after changing them.
 
 ### 4. Start the development server
 
@@ -284,18 +291,18 @@ npm run build
 2. Register your web application and configure the Firebase SDK.
 3. Enable **Cloud Firestore**.
 4. Configure **Firebase Authentication** and the required sign-in providers.
-5. Configure **Firebase App Check**.
-6. Set up **Firebase AI Logic** and enable the required Cloud Gemini model.
+5. Configure **Firebase App Check** with the **reCAPTCHA Enterprise** provider for your production domain (never add `localhost` to the key). Register a debug token for localhost (run the app, open `/ai-check` as an admin, click *Get AI suggestion* once, copy the token printed in the browser console, add it under App Check -> Manage debug tokens). Enforce App Check for **Firebase AI Logic only**: never for Cloud Firestore or Authentication.
+6. Set up **Firebase AI Logic** with the **Gemini Developer API** (free tier, no billing account). If your browser API key has an API allow-list, include the Firebase AI Logic and Firebase App Check APIs.
 7. Configure Firebase Cloud Messaging if notifications are implemented.
-8. Configure Cloud Functions if automatic escalation is implemented.
+8. Automatic escalation runs on the free tier (Next.js server routes plus an external HTTP cron); Cloud Functions are **not** used.
 9. Configure Firestore Security Rules and role-based permissions.
 10. Deploy your Firebase configuration and backend resources.
 
 For local development, configure the appropriate Firebase emulator or App Check debug settings.
 
-**Note:** Cloud Functions may require the Firebase Blaze plan. Check current Firebase pricing and quotas before deployment.
+**Note:** RapidAID stays on the Firebase **Spark** plan and the Gemini Developer API **free tier**. Do not link a billing account: it would end the Gemini free tier. Check current Firebase pricing and quotas before deployment.
 
-For browser-based Gemini Nano integration, verify Chrome's built-in AI availability, supported device requirements, and API permissions. Gemini Nano is not universally available across all browsers and devices.
+For browser-based Gemini Nano integration, verify Chrome's built-in AI availability, supported device requirements, and API permissions. Gemini Nano is not universally available across all browsers and devices: it needs desktop Chrome, a one-time user-initiated model download, enough disk/GPU/RAM, and it only accepts a few Latin-script languages. RapidAID therefore sends Bengali, Hindi and any other non-Latin text straight to cloud Gemini, and phones fall back to cloud or manual input. AI output is only a suggestion that a person confirms; nothing is stored as AI-processed.
 
 </details>
 
