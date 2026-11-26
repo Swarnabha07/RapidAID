@@ -37,24 +37,35 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
  * otherwise reCAPTCHA Enterprise when a site key is configured; otherwise
  * App Check stays off (and the AI module then refuses cloud calls).
  */
-export function resolveAppCheckMode(
-  env: AppCheckEnv,
-): { mode: AppCheckMode; reason?: AppCheckStatus["reason"] } {
+export function resolveAppCheckMode(env: AppCheckEnv): {
+  mode: AppCheckMode;
+  reason?: AppCheckStatus["reason"];
+} {
   if (!env.isBrowser) return { mode: "disabled", reason: "server" };
-  if (env.nodeEnv !== "production" && LOCAL_HOSTS.has(env.hostname)) return { mode: "debug" };
-  if (env.siteKey && env.siteKey.trim().length > 0) return { mode: "recaptcha-enterprise" };
+  if (env.nodeEnv !== "production" && LOCAL_HOSTS.has(env.hostname))
+    return { mode: "debug" };
+  if (env.siteKey && env.siteKey.trim().length > 0)
+    return { mode: "recaptcha-enterprise" };
   return { mode: "disabled", reason: "no-site-key" };
 }
 
 /** Safe, secret-free summary for the diagnostics page (no initialisation). */
-export function describeAppCheckConfig(): { siteKeyConfigured: boolean; hostname: string } {
+export function describeAppCheckConfig(): {
+  siteKeyConfigured: boolean;
+  hostname: string;
+} {
   return {
-    siteKeyConfigured: Boolean(process.env.NEXT_PUBLIC_APPCHECK_RECAPTCHA_SITE_KEY?.trim()),
+    siteKeyConfigured: Boolean(
+      process.env.NEXT_PUBLIC_APPCHECK_RECAPTCHA_SITE_KEY?.trim(),
+    ),
     hostname: typeof window === "undefined" ? "" : window.location.hostname,
   };
 }
 
 let pending: Promise<AppCheckStatus> | null = null;
+let appCheckInstance: ReturnType<
+  typeof import("firebase/app-check").initializeAppCheck
+> | null = null;
 
 /** Idempotent. Never throws. Safe to call before every AI request. */
 export function ensureAppCheck(): Promise<AppCheckStatus> {
@@ -89,19 +100,57 @@ async function initialise(): Promise<AppCheckStatus> {
     if (decision.mode === "debug") {
       // The SDK logs "Firebase App Check debug token: ..." once; register that
       // token in the Firebase Console (App Check > Manage debug tokens).
-      (globalThis as unknown as { FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean }).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+      (
+        globalThis as unknown as { FIREBASE_APPCHECK_DEBUG_TOKEN?: boolean }
+      ).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
     }
-    sdk.initializeAppCheck(app, {
-      // In debug mode the SDK swaps in its debug provider; the placeholder
-      // key is never sent to reCAPTCHA.
-      provider: new sdk.ReCaptchaEnterpriseProvider(siteKey?.trim() || "debug-mode-placeholder"),
+    appCheckInstance = sdk.initializeAppCheck(app, {
+      provider: new sdk.ReCaptchaEnterpriseProvider(
+        siteKey?.trim() || "debug-mode-placeholder",
+      ),
       isTokenAutoRefreshEnabled: true,
     });
     return { ready: true, mode: decision.mode };
   } catch (err) {
     if (isAlreadyInitialized(err)) return { ready: true, mode: decision.mode };
     const code = (err as { code?: unknown } | null)?.code;
-    console.warn("App Check initialisation failed", typeof code === "string" ? code : "unknown");
+    console.warn(
+      "App Check initialisation failed",
+      typeof code === "string" ? code : "unknown",
+    );
     return { ready: false, mode: "disabled", reason: "init-failed" };
+  }
+}
+
+export async function verifyAppCheckToken(): Promise<{
+  ok: boolean;
+  detail?: string;
+}> {
+  const status = await ensureAppCheck();
+
+  if (!status.ready || !appCheckInstance) {
+    return {
+      ok: false,
+      detail: status.reason ?? "app-check-instance-unavailable",
+    };
+  }
+
+  try {
+    const { getToken } = await import("firebase/app-check");
+
+    // Request a fresh token without exposing or storing it.
+    await getToken(appCheckInstance, true);
+
+    return { ok: true };
+  } catch (error: unknown) {
+    const detail =
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      typeof error.code === "string"
+        ? error.code
+        : "token-request-failed";
+
+    return { ok: false, detail };
   }
 }
