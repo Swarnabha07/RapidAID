@@ -6,6 +6,7 @@ import {
   query,
   where,
   orderBy,
+  limit,
   onSnapshot,
   serverTimestamp,
   type QuerySnapshot,
@@ -36,6 +37,18 @@ import {
   type SubmissionKind,
 } from "@/lib/firebase/submission-tracker";
 import { startSubmission, type SubmitSettlement } from "@/lib/utils/submit-flow";
+import {
+  RESPONDER_QUEUE_LIMIT,
+  type QueueErrorLike,
+  type QueueMetaLike,
+} from "@/lib/utils/responder-view";
+import { performReportAction } from "@/lib/utils/report-action-client";
+import {
+  acknowledgePayload,
+  assignPayload,
+  escalatePayload,
+  resolvePayload,
+} from "@/lib/utils/report-action-payloads";
 
 /**
  * What a citizen may provide when creating a report. Everything else (owner check, status,
@@ -270,147 +283,76 @@ export async function getReportById(reportId: string): Promise<Report | null> {
 }
 
 // ---------------------------------------------------------------------------
-// Real-time Queue Listeners
+// Real-time Queue Listeners (responders)
 // ---------------------------------------------------------------------------
 
+type ResponderQueueCallback<T> = (items: T[], meta: QueueMetaLike) => void;
+type ResponderQueueErrorCallback = (error: QueueErrorLike) => void;
+
 /**
- * Subscribes to the live medical queue.
- * Orders reports by urgencyWeight DESC, createdAt DESC and maps to Incident[].
+ * One listener for a dashboard queue. Uses the deployed composite index
+ * (assignedDashboard, urgencyWeight desc, createdAt desc) with `limit(100)`.
+ *
+ * There is deliberately NO fallback query: an unordered or unbounded query would show a wrong or
+ * unbounded list. If the index is missing, the error is surfaced (failed-precondition) and the UI
+ * says so. Server-confirmed vs cached data is reported through `meta.fromCache`.
  */
-export function subscribeToMedicalQueue(
-  callback: (incidents: Incident[]) => void,
-  onError?: (error: Error) => void
+function subscribeToDashboardQueue<T>(
+  dashboard: "medical" | "rescue",
+  mapper: (report: Report) => T,
+  callback: ResponderQueueCallback<T>,
+  onError?: ResponderQueueErrorCallback
 ): Unsubscribe {
   const q = query(
     collection(db, "reports"),
-    where("assignedDashboard", "==", "medical"),
+    where("assignedDashboard", "==", dashboard),
     orderBy("urgencyWeight", "desc"),
-    orderBy("createdAt", "desc")
+    orderBy("createdAt", "desc"),
+    limit(RESPONDER_QUEUE_LIMIT)
   );
 
-  let activeUnsubscribe: Unsubscribe | null = null;
-
-  activeUnsubscribe = onSnapshot(
+  return onSnapshot(
     q,
+    { includeMetadataChanges: true },
     (snapshot) => {
-      const incidents = snapshot.docs.map((docSnap) => {
-        const data = docSnap.data() as Report;
-        return mapReportToMedicalIncident({ ...data, reportId: docSnap.id });
+      const items: T[] = [];
+      let skipped = 0;
+      for (const docSnap of snapshot.docs) {
+        try {
+          items.push(mapper({ ...docSnap.data(), reportId: docSnap.id } as Report));
+        } catch (err) {
+          // One malformed document must not blank the whole queue; it is counted and disclosed.
+          skipped += 1;
+          console.error(`Could not display report ${docSnap.id}:`, err);
+        }
+      }
+      callback(items, {
+        fromCache: snapshot.metadata.fromCache,
+        truncated: snapshot.size >= RESPONDER_QUEUE_LIMIT,
+        skipped,
       });
-      callback(incidents);
     },
     (err) => {
-      console.warn("subscribeToMedicalQueue indexed query warning, trying non-indexed listener:", err);
-      const fallbackQuery = query(
-        collection(db, "reports"),
-        where("assignedDashboard", "==", "medical")
-      );
-
-      activeUnsubscribe = onSnapshot(
-        fallbackQuery,
-        (snapshot) => {
-          const docs = snapshot.docs.map((docSnap) => ({
-            ...(docSnap.data() as Report),
-            reportId: docSnap.id,
-          }));
-          docs.sort((a, b) => {
-            const wDiff = (b.urgencyWeight || 1) - (a.urgencyWeight || 1);
-            if (wDiff !== 0) return wDiff;
-            const timeA = a.createdAt
-              ? typeof (a.createdAt as any).toDate === "function"
-                ? (a.createdAt as any).toDate().getTime()
-                : new Date(a.createdAt as any).getTime()
-              : 0;
-            const timeB = b.createdAt
-              ? typeof (b.createdAt as any).toDate === "function"
-                ? (b.createdAt as any).toDate().getTime()
-                : new Date(b.createdAt as any).getTime()
-              : 0;
-            return timeB - timeA;
-          });
-          callback(docs.map(mapReportToMedicalIncident));
-        },
-        (fallbackErr) => {
-          console.error("subscribeToMedicalQueue fallback failed:", fallbackErr);
-          if (onError) onError(fallbackErr);
-        }
-      );
+      console.error(`${dashboard} queue listener failed:`, err);
+      if (onError) onError({ code: err.code, message: err.message });
     }
   );
-
-  return () => {
-    if (activeUnsubscribe) activeUnsubscribe();
-  };
 }
 
-/**
- * Subscribes to the live rescue & coordination queue.
- * Orders reports by urgencyWeight DESC, createdAt DESC and maps to RescueIncident[].
- */
-export function subscribeToRescueQueue(
-  callback: (incidents: RescueIncident[]) => void,
-  onError?: (error: Error) => void
+/** Live medical queue as Incident[] (every loaded report is shown; nothing is hidden). */
+export function subscribeToMedicalQueue(
+  callback: ResponderQueueCallback<Incident>,
+  onError?: ResponderQueueErrorCallback
 ): Unsubscribe {
-  const q = query(
-    collection(db, "reports"),
-    where("assignedDashboard", "==", "rescue"),
-    orderBy("urgencyWeight", "desc"),
-    orderBy("createdAt", "desc")
-  );
+  return subscribeToDashboardQueue("medical", mapReportToMedicalIncident, callback, onError);
+}
 
-  let activeUnsubscribe: Unsubscribe | null = null;
-
-  activeUnsubscribe = onSnapshot(
-    q,
-    (snapshot) => {
-      const incidents = snapshot.docs.map((docSnap) => {
-        const data = docSnap.data() as Report;
-        return mapReportToRescueIncident({ ...data, reportId: docSnap.id });
-      });
-      callback(incidents);
-    },
-    (err) => {
-      console.warn("subscribeToRescueQueue indexed query warning, trying non-indexed listener:", err);
-      const fallbackQuery = query(
-        collection(db, "reports"),
-        where("assignedDashboard", "==", "rescue")
-      );
-
-      activeUnsubscribe = onSnapshot(
-        fallbackQuery,
-        (snapshot) => {
-          const docs = snapshot.docs.map((docSnap) => ({
-            ...(docSnap.data() as Report),
-            reportId: docSnap.id,
-          }));
-          docs.sort((a, b) => {
-            const wDiff = (b.urgencyWeight || 1) - (a.urgencyWeight || 1);
-            if (wDiff !== 0) return wDiff;
-            const timeA = a.createdAt
-              ? typeof (a.createdAt as any).toDate === "function"
-                ? (a.createdAt as any).toDate().getTime()
-                : new Date(a.createdAt as any).getTime()
-              : 0;
-            const timeB = b.createdAt
-              ? typeof (b.createdAt as any).toDate === "function"
-                ? (b.createdAt as any).toDate().getTime()
-                : new Date(b.createdAt as any).getTime()
-              : 0;
-            return timeB - timeA;
-          });
-          callback(docs.map(mapReportToRescueIncident));
-        },
-        (fallbackErr) => {
-          console.error("subscribeToRescueQueue fallback failed:", fallbackErr);
-          if (onError) onError(fallbackErr);
-        }
-      );
-    }
-  );
-
-  return () => {
-    if (activeUnsubscribe) activeUnsubscribe();
-  };
+/** Live rescue queue as RescueIncident[] (every loaded report is shown; nothing is hidden). */
+export function subscribeToRescueQueue(
+  callback: ResponderQueueCallback<RescueIncident>,
+  onError?: ResponderQueueErrorCallback
+): Unsubscribe {
+  return subscribeToDashboardQueue("rescue", mapReportToRescueIncident, callback, onError);
 }
 
 /** Snapshot-level metadata for the citizen's report list (T4). */
@@ -521,77 +463,46 @@ export function subscribeToUserRequests(
 /**
  * Sends a responder action to the server. Responders can NOT write reports directly
  * (Firestore rules block it); the server verifies the token, role, dashboard ownership and
- * state transition, then records the trusted actor and timestamp.
+ * state transition, then records the trusted actor and timestamp. A rejection ALWAYS throws a
+ * ResponderActionError, so a dialog can never report success for an action the server refused.
  */
 async function sendReportAction(
   reportId: string,
   payload: Record<string, unknown>
 ): Promise<void> {
-  const currentUser = auth.currentUser;
-  if (!currentUser) throw new Error("You must be signed in to update a report.");
-  const token = await currentUser.getIdToken();
-  const res = await fetch(`/api/reports/${encodeURIComponent(reportId)}`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
+  await performReportAction(reportId, payload, {
+    getToken: async (forceRefresh) => {
+      const currentUser = auth.currentUser;
+      return currentUser ? currentUser.getIdToken(forceRefresh) : null;
     },
-    body: JSON.stringify(payload),
+    fetchImpl: (input, init) => fetch(input, init),
   });
-  if (!res.ok) {
-    const errorData = await res.json().catch(() => ({}));
-    throw new Error(errorData.error || `Report update failed with HTTP ${res.status}`);
-  }
 }
 
-/**
- * Acknowledges an incident from the AcknowledgeDialog.
- * Stops the overdue countdown. The acknowledging responder is taken from the verified token,
- * so `responderName` is kept only for backward compatibility and is ignored.
- */
-export async function acknowledgeReport(
-  reportId: string,
-  note?: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  responderName?: string
-): Promise<void> {
-  await sendReportAction(reportId, { action: "acknowledge", note });
+/** Acknowledges a report. The acknowledging responder is taken from the verified token. */
+export async function acknowledgeReport(reportId: string, note?: string): Promise<void> {
+  await sendReportAction(reportId, acknowledgePayload(note));
 }
 
-/**
- * Assigns a responder unit/team from the AssignTeamDialog or AssignUnitDialog.
- */
+/** Records a free-text unit/team name against the report (no roster exists). */
 export async function assignResponderUnit(
   reportId: string,
   unitName: string,
-  note?: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  responderName?: string
+  note?: string
 ): Promise<void> {
-  await sendReportAction(reportId, { action: "assign", unitName, note });
+  await sendReportAction(reportId, assignPayload(unitName, note));
 }
 
-/**
- * Manually escalates a report from EscalateDialog. Urgency can only be raised, never lowered.
- */
+/** Manually escalates a report. Urgency can only be raised, never lowered (server-enforced). */
 export async function escalateReportManual(
   reportId: string,
   urgency: ReportUrgency,
-  reason: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  responderName?: string
+  reason: string
 ): Promise<void> {
-  await sendReportAction(reportId, { action: "escalate", urgency, reason });
+  await sendReportAction(reportId, escalatePayload(urgency, reason));
 }
 
-/**
- * Resolves an incident from the ResolveDialog.
- */
-export async function resolveReport(
-  reportId: string,
-  resolutionNote: string,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  responderName?: string
-): Promise<void> {
-  await sendReportAction(reportId, { action: "resolve", resolutionNote });
+/** Resolves a report with a required resolution note. */
+export async function resolveReport(reportId: string, resolutionNote: string): Promise<void> {
+  await sendReportAction(reportId, resolvePayload(resolutionNote));
 }

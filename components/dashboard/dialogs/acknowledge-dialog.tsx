@@ -1,48 +1,43 @@
 "use client";
 
-import { useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+import { ActionAlert } from "@/components/responder/queue-state";
 import type { Incident } from "@/lib/types/incident";
 import { useAuth } from "@/lib/firebase/auth";
 import { acknowledgeReport } from "@/lib/firebase/firestore";
+import { useActionSubmit } from "@/lib/hooks/use-action-submit";
+import { responderLabel } from "@/lib/utils/action-errors";
 
 export function AcknowledgeDialog({
   incident,
   open,
   onClose,
-  onConfirm,
+  onSuccess,
 }: {
   incident: Incident;
   open: boolean;
   onClose: () => void;
-  onConfirm: () => void;
+  /** Called ONLY after the server accepted the action. */
+  onSuccess: () => void;
 }) {
-  const { user, profile } = useAuth();
-  const [submitting, setSubmitting] = useState(false);
+  const { user, role } = useAuth();
+  const { submitting, error, run, clearError } = useActionSubmit();
+  const responderName = responderLabel(user, role);
 
-  const responderName =
-    profile?.displayName || user?.displayName || "Dr. Maya Chen";
+  const close = () => {
+    if (submitting) return;
+    clearError();
+    onClose();
+  };
 
   const handleConfirm = async () => {
-    setSubmitting(true);
-    try {
-      await acknowledgeReport(
-        incident.id,
-        "Acknowledgement confirmed by medical coordinator",
-        responderName
-      );
-    } catch (err) {
-      console.warn("acknowledgeReport error:", err);
-    } finally {
-      setSubmitting(false);
-      onConfirm();
-    }
+    if (await run(() => acknowledgeReport(incident.id))) onSuccess();
   };
 
   return (
-    <Modal open={open} onClose={onClose} labelledBy="ack-title">
+    <Modal open={open} onClose={close} labelledBy="ack-title">
       <p className="text-xs font-medium text-brand-blue">Confirm status change</p>
       <h2 id="ack-title" className="mt-2 text-2xl font-semibold text-white">
         Acknowledge incident?
@@ -58,22 +53,23 @@ export function AcknowledgeDialog({
       </div>
 
       <p className="mt-5 text-sm leading-relaxed text-text-inverse-muted">
-        You will be recorded as the acknowledging responder. The current
-        acknowledgement countdown will stop.
+        You will be recorded as the acknowledging responder, and the report moves to in progress.
       </p>
       <p className="mt-3 text-sm leading-relaxed text-text-inverse-muted">
-        No team will be assigned or dispatched by this action.
+        No team is assigned or dispatched by this action.
       </p>
 
       <div className="mt-5 flex items-center gap-2 rounded-md bg-normal-soft px-3 py-2.5 text-sm text-[#5fd996]">
-        <Check size={15} /> {responderName} · backend-authorized coordinator
+        <Check size={15} /> Recorded as {responderName}
       </div>
+
+      <ActionAlert message={error} />
 
       <div className="mt-6 flex justify-end gap-3">
         <Button
           variant="secondary"
           className="bg-transparent text-white border-white/15 hover:bg-white/5"
-          onClick={onClose}
+          onClick={close}
           disabled={submitting}
         >
           Cancel

@@ -103,7 +103,7 @@ Feed      Dashboard  Dashboard
 | Offline / PWA | next-pwa (service worker, offline caching) |
 | Notifications | Firebase Cloud Messaging |
 | Automation | Firebase Cloud Functions (scheduled auto-escalation) |
-| Maps | Leaflet + OpenStreetMap tiles (citizen report location picker; responder maps are still mocks) |
+| Maps | Leaflet + OpenStreetMap tiles (citizen report location picker and the read-only responder incident maps) |
 | Config | Firebase Remote Config |
 | Hosting | Vercel (frontend), Firebase (backend services) |
 
