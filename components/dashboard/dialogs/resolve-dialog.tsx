@@ -3,44 +3,49 @@
 import { useState } from "react";
 import { Check, Loader2 } from "lucide-react";
 import { Modal } from "@/components/ui/modal";
+import { ActionAlert } from "@/components/responder/queue-state";
 import { Button } from "@/components/ui/button";
 import type { Incident } from "@/lib/types/incident";
 import { useAuth } from "@/lib/firebase/auth";
 import { resolveReport } from "@/lib/firebase/firestore";
+import { useActionSubmit } from "@/lib/hooks/use-action-submit";
+import { responderLabel } from "@/lib/utils/action-errors";
+import { ACTION_LIMITS, lengthOk } from "@/lib/utils/report-action-payloads";
 
 export function ResolveDialog({
   incident,
   open,
   onClose,
-  onConfirm,
+  onSuccess,
 }: {
   incident: Incident;
   open: boolean;
   onClose: () => void;
-  onConfirm: (note: string) => void;
+  /** Called ONLY after the server accepted the action. */
+  onSuccess: () => void;
 }) {
-  const { user, profile } = useAuth();
+  const { user, role } = useAuth();
+  const { submitting, error, run, clearError } = useActionSubmit();
   const [note, setNote] = useState("");
-  const [submitting, setSubmitting] = useState(false);
+  const responderName = responderLabel(user, role);
+  const valid = lengthOk(note, ACTION_LIMITS.resolution);
 
-  const responderName =
-    profile?.displayName || user?.displayName || "Dr. Maya Chen";
+  const close = () => {
+    if (submitting) return;
+    clearError();
+    onClose();
+  };
 
   const handleConfirm = async () => {
-    if (!note.trim()) return;
-    setSubmitting(true);
-    try {
-      await resolveReport(incident.id, note.trim(), responderName);
-    } catch (err) {
-      console.warn("resolveReport error:", err);
-    } finally {
-      setSubmitting(false);
-      onConfirm(note.trim());
+    if (!valid) return;
+    if (await run(() => resolveReport(incident.id, note))) {
+      setNote("");
+      onSuccess();
     }
   };
 
   return (
-    <Modal open={open} onClose={onClose} labelledBy="resolve-title">
+    <Modal open={open} onClose={close} labelledBy="resolve-title">
       <p className="text-xs font-medium text-brand-blue">Confirm status change</p>
       <h2 id="resolve-title" className="mt-2 text-2xl font-semibold text-white">
         Resolve incident?
@@ -62,6 +67,7 @@ export function ResolveDialog({
         value={note}
         onChange={(e) => setNote(e.target.value)}
         rows={4}
+        maxLength={ACTION_LIMITS.resolution.max}
         placeholder="Describe the outcome and any handover details."
         className="mt-2 w-full resize-none rounded-md border border-white/10 bg-ink p-3 text-sm text-white placeholder:text-text-inverse-muted/60 focus:outline-none focus:ring-1 focus:ring-brand-blue"
       />
@@ -72,19 +78,21 @@ export function ResolveDialog({
       </p>
 
       <div className="mt-5 flex items-center gap-2 rounded-md bg-normal-soft px-3 py-2.5 text-sm text-[#5fd996]">
-        <Check size={15} /> {responderName} · verified coordinator
+        <Check size={15} /> Recorded as {responderName}
       </div>
+
+      <ActionAlert message={error} />
 
       <div className="mt-6 flex justify-end gap-3">
         <Button
           variant="secondary"
           className="bg-transparent text-white border-white/15 hover:bg-white/5"
-          onClick={onClose}
+          onClick={close}
           disabled={submitting}
         >
           Cancel
         </Button>
-        <Button disabled={!note.trim() || submitting} onClick={handleConfirm}>
+        <Button disabled={!valid || submitting} onClick={handleConfirm}>
           {submitting && <Loader2 size={14} className="mr-1.5 animate-spin" />}
           {submitting ? "Resolving..." : "Resolve incident"}
         </Button>

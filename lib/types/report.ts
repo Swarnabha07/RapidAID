@@ -263,7 +263,7 @@ export function mapReportUrgencyToRescue(urgency: ReportUrgency): RescueUrgency 
       return "High";
     case "normal":
     default:
-      return "Medium";
+      return "Normal";
   }
 }
 
@@ -287,7 +287,8 @@ export function mapReportStatusToIncidentStatus(
     case "resolved":
       return "Resolved";
     case "dispatched":
-      return "En route";
+      // A unit was recorded against the report. Nothing confirms it is travelling.
+      return "Assigned";
     case "in_progress":
       return "In progress";
     case "received":
@@ -305,6 +306,7 @@ export function mapReportStatusToRescueStatus(
     case "resolved":
       return "Resolved";
     case "dispatched":
+      return "Assigned";
     case "in_progress":
       return "In progress";
     case "received":
@@ -332,64 +334,62 @@ export function mapReportStatusToCitizenStatus(
 // Document -> UI shape mappers
 // ---------------------------------------------------------------------------
 
+function toMs(ts: Timestamp | string | number | Date | null | undefined): number | null {
+  if (!ts) return null;
+  const ms = toDate(ts).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function validCoordinate(value: unknown): number | null {
+  return isFiniteNumber(value) ? value : null;
+}
+
+/** Who performed an activity-trail action: the verified name when recorded, else the role. */
+function actorLabelOf(entry: ReportActivityEntry): string {
+  if (entry.actorName) return entry.actorName;
+  return entry.actorRole === "citizen" || entry.actorRole === "victim" ? "Citizen" : entry.actorRole;
+}
+
+/** Timeline shared by both dashboards. Built only from what the document records. */
+function buildTimeline(report: Report): MedicalTimelineEntry[] {
+  const entry = (
+    ts: Timestamp | string | number | Date | null | undefined,
+    label: string,
+    actor: string
+  ): MedicalTimelineEntry => ({
+    time: formatTimeToHHMMSS(ts),
+    label,
+    actor,
+    atMs: toMs(ts),
+  });
+
+  if (report.activityTrail && report.activityTrail.length > 0) {
+    return report.activityTrail.map((e) => entry(e.timestamp, e.action, actorLabelOf(e)));
+  }
+  return [
+    entry(report.createdAt, "Report received", "Citizen portal"),
+    ...(report.syncedAt ? [entry(report.syncedAt, "Incident synchronized", "Sync service")] : []),
+    ...(report.acknowledgedAt
+      ? [entry(report.acknowledgedAt, "Incident acknowledged", report.acknowledgedBy ?? "Responder")]
+      : []),
+    ...(report.assignedTeamOrUnit
+      ? [entry(report.updatedAt, `${report.assignedTeamOrUnit} assigned`, report.acknowledgedBy ?? "Responder")]
+      : []),
+    ...(report.status === "resolved"
+      ? [entry(report.updatedAt, "Incident resolved", report.acknowledgedBy ?? "Responder")]
+      : []),
+  ];
+}
+
 /**
  * Maps a Firestore Report document to the Incident interface expected by the Medical Dashboard.
+ * Urgency is the report's urgency as submitted (raised only by a recorded escalation); nothing
+ * here claims AI assessment or human confirmation that did not happen.
  */
 export function mapReportToMedicalIncident(report: Report): Incident {
   const hasTeam = Boolean(report.assignedTeamOrUnit);
   const isAck = Boolean(report.acknowledgedAt || report.acknowledgedBy);
   const locationLabel = describeLocation(report.location);
-
-  const timeline: MedicalTimelineEntry[] =
-    report.activityTrail && report.activityTrail.length > 0
-      ? report.activityTrail.map((entry) => ({
-          time: formatTimeToHHMMSS(entry.timestamp),
-          label: entry.action,
-          actor: entry.actorRole,
-        }))
-      : [
-          {
-            time: formatTimeToHHMMSS(report.createdAt),
-            label: "Report received",
-            actor: "Citizen portal",
-          },
-          ...(report.syncedAt
-            ? [
-                {
-                  time: formatTimeToHHMMSS(report.syncedAt),
-                  label: "Incident synchronized",
-                  actor: "Sync service",
-                },
-              ]
-            : []),
-          ...(report.acknowledgedAt
-            ? [
-                {
-                  time: formatTimeToHHMMSS(report.acknowledgedAt),
-                  label: "Incident acknowledged",
-                  actor: report.acknowledgedBy ?? "Medical Coordinator",
-                },
-              ]
-            : []),
-          ...(report.assignedTeamOrUnit
-            ? [
-                {
-                  time: formatTimeToHHMMSS(report.updatedAt),
-                  label: `${report.assignedTeamOrUnit} assigned`,
-                  actor: report.acknowledgedBy ?? "Medical Coordinator",
-                },
-              ]
-            : []),
-          ...(report.status === "resolved"
-            ? [
-                {
-                  time: formatTimeToHHMMSS(report.updatedAt),
-                  label: "Incident resolved",
-                  actor: report.acknowledgedBy ?? "Attending Lead",
-                },
-              ]
-            : []),
-        ];
 
   return {
     id: report.reportId,
@@ -399,27 +399,30 @@ export function mapReportToMedicalIncident(report: Report): Incident {
     peopleAffected: report.peopleAffected ?? 1,
     reportedAt: formatTimeToHHMM(report.createdAt),
     reportedAgo: formatTimeToAgo(report.createdAt),
-    aiUrgency: mapReportUrgencyToMedical(report.urgency),
-    humanPriority: mapReportUrgencyToMedical(report.urgency),
-    priorityConfirmedBy:
-      report.priorityConfirmedBy ?? (isAck ? report.acknowledgedBy ?? null : null),
+    createdAtMs: toMs(report.createdAt),
+    urgency: mapReportUrgencyToMedical(report.urgency),
     team: report.assignedTeamOrUnit ?? null,
-    acknowledgedBy:
-      report.acknowledgedBy ?? (isAck ? "Verified Coordinator" : null),
+    acknowledgedBy: report.acknowledgedBy ?? (isAck ? "Responder" : null),
     status: mapReportStatusToIncidentStatus(report.status, hasTeam),
+    awaitingAcknowledgement: report.status === "received",
     citizenReport: report.translatedDescription || report.description,
     citizenReportTime: formatTimeToHHMMSS(report.createdAt),
     reportedInjuries: report.reportedInjuries ?? "Not reported",
     attachment: report.mediaUrl ?? undefined,
     aiTriageSummary: report.aiTriageSummary ?? NO_AI_SUMMARY_LABEL,
     escalationLevel: report.escalationLevel ?? (report.escalated ? 1 : 0),
-    acknowledgementOverdueBy: report.escalated ? "Overdue" : undefined,
-    timeline,
+    escalated: Boolean(report.escalated),
+    escalatedAtMs: toMs(report.escalatedAt),
+    isSOS: Boolean(report.isSOS),
+    lat: validCoordinate(report.location?.lat),
+    lng: validCoordinate(report.location?.lng),
+    timeline: buildTimeline(report),
   };
 }
 
 /**
  * Maps a Firestore Report document to the RescueIncident interface expected by the Rescue Dashboard.
+ * Every report stays visible; `isDuplicateOf` is only displayed, never used to hide anything.
  */
 export function mapReportToRescueIncident(report: Report): RescueIncident {
   const hasUnit = Boolean(report.assignedTeamOrUnit);
@@ -428,8 +431,8 @@ export function mapReportToRescueIncident(report: Report): RescueIncident {
 
   const contextLinks: string[] = [];
   if (report.isSOS) contextLinks.push("⚡ SOS Emergency Flag");
-  if (report.mediaUrl) contextLinks.push("Field Attachment ↗");
-  if (report.isDuplicateOf) contextLinks.push(`Merged: ${report.isDuplicateOf}`);
+  if (report.mediaUrl) contextLinks.push("Field attachment");
+  if (report.isDuplicateOf) contextLinks.push(`Linked to: ${report.isDuplicateOf}`);
 
   return {
     id: report.reportId,
@@ -439,21 +442,27 @@ export function mapReportToRescueIncident(report: Report): RescueIncident {
     location: locationLabel,
     zone: report.location?.zone || ZONE_UNKNOWN_LABEL,
     people: report.peopleAffected ?? 1,
-    extra: report.isSOS ? "SOS emergency flag · Immediate action" : `${report.peopleAffected ?? 1} affected`,
-    aiUrgency: mapReportUrgencyToRescue(report.urgency),
-    confirmedPriority: mapReportUrgencyToRescue(report.urgency),
+    extra: report.isSOS ? "SOS emergency flag" : `${report.peopleAffected ?? 1} affected`,
+    urgency: mapReportUrgencyToRescue(report.urgency),
     reportedAgo: formatTimeToAgo(report.createdAt),
+    createdAtMs: toMs(report.createdAt),
     unit: report.assignedTeamOrUnit ?? null,
     status: mapReportStatusToRescueStatus(report.status, hasUnit, isAck),
-    acknowledgedBy: report.acknowledgedBy ?? (isAck ? "Verified Coordinator" : null),
+    awaitingAcknowledgement: report.status === "received",
+    acknowledgedBy: report.acknowledgedBy ?? (isAck ? "Responder" : null),
     acknowledgedAt: report.acknowledgedAt ? formatTimeToHHMMSS(report.acknowledgedAt) : undefined,
     description: report.translatedDescription || report.description,
-    accessConditions: report.accessConditions ?? "Field route access unverified. Confirm with lead before entry.",
-    aiTriageLabel: report.aiTriageLabel ?? `REPORTED ${report.urgency.toUpperCase()}`,
+    accessConditions: report.accessConditions ?? null,
     aiTriageSummary: report.aiTriageSummary ?? NO_AI_SUMMARY_LABEL,
     contextLinks,
-    lastVerified: `Report source: ${describeProcessing(report.processedBy)}`,
-    reviewedBy: report.reviewedBy ?? (report.acknowledgedBy ? `${report.acknowledgedBy} · Reviewed` : "Unreviewed"),
+    sourceNote: `Report source: ${describeProcessing(report.processedBy)}`,
+    escalationLevel: report.escalationLevel ?? (report.escalated ? 1 : 0),
+    escalated: Boolean(report.escalated),
+    escalatedAtMs: toMs(report.escalatedAt),
+    isSOS: Boolean(report.isSOS),
+    lat: validCoordinate(report.location?.lat),
+    lng: validCoordinate(report.location?.lng),
+    timeline: buildTimeline(report),
   };
 }
 

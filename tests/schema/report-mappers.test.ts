@@ -69,14 +69,12 @@ test("a stored AI summary is passed through unchanged", () => {
   assert.equal(mapReportToMedicalIncident(r).aiTriageSummary, "Stored summary text");
   const rescue = mapReportToRescueIncident(r);
   assert.equal(rescue.aiTriageSummary, "Stored summary text");
-  assert.equal(rescue.aiTriageLabel, "STORED LABEL");
 });
 
 test("rescue labels describe the report source truthfully", () => {
-  assert.match(mapReportToRescueIncident(report({ processedBy: "manual" })).lastVerified, /no AI processing/i);
-  assert.doesNotMatch(mapReportToRescueIncident(report({ processedBy: "manual" })).lastVerified, /verified via/i);
-  assert.match(mapReportToRescueIncident(report({ processedBy: "cloud" })).lastVerified, /as recorded on the report/);
-  assert.match(mapReportToRescueIncident(report({ urgency: "critical" })).aiTriageLabel, /^REPORTED CRITICAL$/);
+  assert.match(mapReportToRescueIncident(report({ processedBy: "manual" })).sourceNote, /no AI processing/i);
+  assert.doesNotMatch(mapReportToRescueIncident(report({ processedBy: "manual" })).sourceNote, /verified via/i);
+  assert.match(mapReportToRescueIncident(report({ processedBy: "cloud" })).sourceNote, /as recorded on the report/);
   assert.equal(describeProcessing(undefined), "Processing source not recorded");
 });
 
@@ -111,4 +109,71 @@ test("legacy documents that still carry AI provenance and numeric confidence are
   const legacy = report({ processedBy: "cloud", confidenceScore: 0.97 });
   assert.doesNotThrow(() => mapReportToRescueIncident(legacy));
   assert.doesNotThrow(() => mapReportToMedicalIncident(legacy));
+});
+
+// ---------------------------------------------------------------------------
+// T5 - truthful responder shapes
+// ---------------------------------------------------------------------------
+
+test("T5: urgency is the reported urgency and no AI / human-confirmation fields remain", () => {
+  const m = mapReportToMedicalIncident(report({ urgency: "high" }));
+  assert.equal(m.urgency, "High");
+  assert.equal("aiUrgency" in m, false);
+  assert.equal("humanPriority" in m, false);
+  assert.equal("priorityConfirmedBy" in m, false);
+  const r = mapReportToRescueIncident(report({ urgency: "normal" }));
+  assert.equal(r.urgency, "Normal"); // there is no "Medium" level in the data model
+  assert.equal("confirmedPriority" in r, false);
+  assert.equal("reviewedBy" in r, false);
+});
+
+test("T5: dispatched is shown as Assigned, never as En route", () => {
+  assert.equal(mapReportToMedicalIncident(report({ status: "dispatched", assignedTeamOrUnit: "Alpha 03" })).status, "Assigned");
+  assert.equal(mapReportToRescueIncident(report({ status: "dispatched", assignedTeamOrUnit: "RS-05" })).status, "Assigned");
+  assert.equal(mapReportToRescueIncident(report({ status: "in_progress" })).status, "In progress");
+});
+
+test("T5: awaitingAcknowledgement follows the policy (status received only)", () => {
+  assert.equal(mapReportToMedicalIncident(report({ status: "received" })).awaitingAcknowledgement, true);
+  assert.equal(mapReportToRescueIncident(report({ status: "received" })).awaitingAcknowledgement, true);
+  for (const status of ["in_progress", "dispatched", "resolved"] as const) {
+    assert.equal(mapReportToMedicalIncident(report({ status })).awaitingAcknowledgement, false, status);
+  }
+});
+
+test("T5: coordinates, SOS flag and createdAtMs are carried for the map and timers", () => {
+  const m = mapReportToMedicalIncident(report({ isSOS: true, location: { lat: 22.5, lng: 88.3 } }));
+  assert.equal(m.lat, 22.5);
+  assert.equal(m.lng, 88.3);
+  assert.equal(m.isSOS, true);
+  assert.equal(m.createdAtMs, new Date("2026-11-24T10:00:00Z").getTime());
+  const bad = mapReportToRescueIncident(report({ location: { lat: NaN, lng: 2 } as never }));
+  assert.equal(bad.lat, null);
+  assert.equal(mapReportToMedicalIncident(report({ location: undefined as unknown as Report["location"] })).lat, null);
+});
+
+test("T5: the timeline names the verified actor and carries sortable times", () => {
+  const m = mapReportToMedicalIncident(
+    report({
+      activityTrail: [
+        { id: "a", action: "Report submitted", actorRole: "citizen", timestamp: "2026-11-24T10:00:00Z" },
+        { id: "b", action: "Report acknowledged", actorRole: "medical", actorName: "Dr Test", timestamp: "2026-11-24T10:05:00Z" },
+      ],
+    })
+  );
+  assert.equal(m.timeline[0].actor, "Citizen");
+  assert.equal(m.timeline[1].actor, "Dr Test");
+  assert.ok((m.timeline[1].atMs ?? 0) > (m.timeline[0].atMs ?? 0));
+  assert.doesNotMatch(JSON.stringify(m), /Verified Coordinator|Maya|Chen/);
+});
+
+test("T5: reports are never hidden because they are linked to another report", () => {
+  const r = mapReportToRescueIncident(report({ isDuplicateOf: "RPT-OTHER", category: "water", assignedDashboard: "rescue" }));
+  assert.equal(r.id, "report-12345678");
+  assert.ok(r.contextLinks.some((l) => l.includes("RPT-OTHER")));
+});
+
+test("T5: missing access conditions are reported as missing, not invented", () => {
+  assert.equal(mapReportToRescueIncident(report()).accessConditions, null);
+  assert.equal(mapReportToRescueIncident(report({ accessConditions: "Gate locked" })).accessConditions, "Gate locked");
 });

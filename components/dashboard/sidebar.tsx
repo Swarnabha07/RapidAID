@@ -18,21 +18,22 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/firebase/auth";
+import { responderLabel } from "@/lib/utils/action-errors";
 
 const NAV_ITEMS = [
   { label: "Overview", icon: LayoutGrid },
-  { label: "Incident Queue", icon: ListChecks, badge: 12, active: true },
+  { label: "Incident Queue", icon: ListChecks, active: true },
   { label: "Assigned Cases", icon: FolderCheck },
   { label: "Medical Teams", icon: Users },
   { label: "Map View", icon: Map },
-  { label: "Escalations", icon: TriangleAlert, badge: 2, badgeTone: "critical" },
+  { label: "Escalations", icon: TriangleAlert },
   { label: "Activity Log", icon: History },
 ];
 
 export function DashboardSidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [signingOut, setSigningOut] = useState(false);
-  const { user, profile, signOutUser } = useAuth();
+  const { user, role, signOutUser } = useAuth();
   const router = useRouter();
 
   const handleSignOut = async () => {
@@ -46,8 +47,7 @@ export function DashboardSidebar() {
     }
   };
 
-  const displayName =
-    profile?.displayName || user?.displayName || user?.email?.split("@")[0] || "Coordinator";
+  const displayName = responderLabel(user, role);
 
   return (
     <>
@@ -97,29 +97,20 @@ export function DashboardSidebar() {
               <li key={item.label}>
                 <button
                   type="button"
+                  disabled={!item.active}
+                  aria-current={item.active ? "page" : undefined}
+                  title={item.active ? undefined : "Not available yet"}
                   className={cn(
                     "flex w-full items-center justify-between rounded-md px-3 py-2.5 text-[13.5px] transition-colors",
                     item.active
                       ? "bg-brand-blue/15 text-white"
-                      : "text-text-inverse-muted hover:bg-white/5 hover:text-white"
+                      : "cursor-not-allowed text-text-inverse-muted opacity-50"
                   )}
                 >
                   <span className="flex items-center gap-3">
                     <item.icon size={17} strokeWidth={1.75} />
                     {item.label}
                   </span>
-                  {item.badge !== undefined && (
-                    <span
-                      className={cn(
-                        "rounded-full px-1.5 py-0.5 text-[11px] font-medium",
-                        item.badgeTone === "critical"
-                          ? "bg-critical text-white"
-                          : "bg-white/10 text-text-inverse-muted"
-                      )}
-                    >
-                      {item.badge}
-                    </span>
-                  )}
                 </button>
               </li>
             ))}
@@ -127,7 +118,9 @@ export function DashboardSidebar() {
 
           <button
             type="button"
-            className="mt-2 flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[13.5px] text-text-inverse-muted hover:bg-white/5 hover:text-white"
+            disabled
+            title="Not available yet"
+            className="mt-2 flex w-full cursor-not-allowed items-center gap-3 rounded-md px-3 py-2.5 text-[13.5px] text-text-inverse-muted opacity-50"
           >
             <Settings size={17} strokeWidth={1.75} />
             Settings

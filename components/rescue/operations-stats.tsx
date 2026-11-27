@@ -1,18 +1,32 @@
-import type { RoleViewConfig } from "@/lib/types/rescue";
+import type { RescueIncident } from "@/lib/types/rescue";
+import { elapsedLabel, oldestAwaiting, summarizeQueue } from "@/lib/utils/responder-view";
 
-export function OperationsStats({ view }: { view: RoleViewConfig }) {
+export function OperationsStats({
+  incidents,
+  loaded,
+  now,
+}: {
+  incidents: readonly RescueIncident[];
+  loaded: boolean;
+  now: number;
+}) {
+  const s = summarizeQueue(incidents, (i) => i.unit);
+  const oldest = oldestAwaiting(incidents);
+  const show = (n: number) => (loaded ? String(n) : "—");
+  const note = (text: string) => (loaded ? text : "Loading…");
+
   const stats = [
-    { label: "Active rescue incidents", value: view.stats.active, detail: "North district", tone: "text-white" },
-    { label: "Critical incidents", value: view.stats.critical, detail: "Requires attention", tone: "text-[#ff8a8d]" },
-    { label: "Awaiting acknowledgement", value: view.stats.awaitingAck, detail: "Within response window", tone: "text-[#ffb36b]" },
+    { label: "Active rescue incidents", value: show(s.active), detail: note("Not resolved"), tone: "text-white" },
+    { label: "Critical incidents", value: show(s.critical), detail: note("Reported critical, active"), tone: "text-[#ff8a8d]" },
     {
-      label: "Teams deployed / assigned",
-      value: `${view.stats.deployed} / ${view.stats.deployedTotal}`,
-      detail: "Human-authorized",
-      tone: "text-white",
+      label: "Awaiting acknowledgement",
+      value: show(s.awaitingAck),
+      detail: note(oldest ? `Oldest · ${elapsedLabel(oldest.createdAtMs, now)}` : "None waiting"),
+      tone: "text-[#ffb36b]",
     },
-    { label: "Available units", value: view.stats.availableUnits, detail: "Ready for allocation", tone: "text-[#5fd996]" },
-    { label: "Ongoing evacuations", value: view.stats.evacuations, detail: "Across 3 sectors", tone: "text-white" },
+    { label: "In progress", value: show(s.inProgress), detail: note("Acknowledged, no unit recorded"), tone: "text-white" },
+    { label: "Assigned units", value: show(s.units), detail: note("Names entered by responders"), tone: "text-[#5fd996]" },
+    { label: "Resolved", value: show(s.resolved), detail: note(`Of ${s.total} loaded reports`), tone: "text-white" },
   ];
 
   return (

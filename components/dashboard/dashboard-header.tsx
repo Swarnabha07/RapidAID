@@ -4,29 +4,29 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Bell, LogOut } from "lucide-react";
 import { useAuth } from "@/lib/firebase/auth";
+import { LiveIndicator } from "@/components/responder/queue-state";
+import { responderLabel } from "@/lib/utils/action-errors";
+import type { LiveState } from "@/lib/utils/responder-view";
 
-export function DashboardHeader() {
-  const { user, profile, role, signOutUser } = useAuth();
+export function DashboardHeader({ liveState }: { liveState: LiveState }) {
+  const { user, role, signOutUser } = useAuth();
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
 
-  const responderName =
-    profile?.displayName || user?.displayName || user?.email?.split("@")[0] || "Dr. Maya Chen";
+  // Same name the server will record (verified token name, else e-mail prefix, else role).
+  const responderName = responderLabel(user, role);
 
-  const roleLabel =
-    role === "admin"
-      ? "Verified administrator"
-      : "Verified medical coordinator";
+  const roleLabel = role === "admin" ? "Administrator" : "Medical coordinator";
 
   const initials = (() => {
-    const source = profile?.displayName || user?.displayName;
+    const source = user?.displayName;
     if (source) {
       const parts = source.trim().split(/\s+/);
       if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
       return parts[0].slice(0, 2).toUpperCase();
     }
     if (user?.email) return user.email.slice(0, 2).toUpperCase();
-    return "MC";
+    return "RS";
   })();
 
   const handleSignOut = async () => {
@@ -56,25 +56,24 @@ export function DashboardHeader() {
         />
         <input
           type="text"
-          placeholder="Search incidents, locations..."
-          className="h-9 w-full rounded-md border border-white/10 bg-ink-raised pl-9 pr-12 text-[13px] text-white placeholder:text-text-inverse-muted/70 focus:outline-none focus:ring-1 focus:ring-brand-blue"
+          disabled
+          title="Search is not available yet"
+          placeholder="Search (not available yet)"
+          className="h-9 w-full cursor-not-allowed rounded-md border border-white/10 bg-ink-raised pl-9 pr-12 text-[13px] text-white opacity-50 placeholder:text-text-inverse-muted/70"
         />
-        <kbd className="absolute right-2.5 top-1/2 -translate-y-1/2 rounded border border-white/10 px-1.5 py-0.5 text-[10px] text-text-inverse-muted/70">
-          ⌘K
-        </kbd>
       </div>
 
       <div className="ml-auto flex items-center gap-4 md:ml-0">
-        <span className="hidden items-center gap-1.5 text-xs text-text-inverse-muted sm:flex">
-          <span className="h-1.5 w-1.5 rounded-full bg-normal" /> Live · synchronized
-        </span>
+        <LiveIndicator state={liveState} />
 
         <button
-          aria-label="Notifications"
-          className="relative flex h-9 w-9 items-center justify-center rounded-md text-text-inverse-muted hover:bg-white/5"
+          type="button"
+          disabled
+          aria-label="Notifications (not available yet)"
+          title="Notifications are not available yet"
+          className="flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-md text-text-inverse-muted opacity-50"
         >
           <Bell size={17} />
-          <span className="absolute right-2 top-2 h-1.5 w-1.5 rounded-full bg-critical" />
         </button>
 
         <div className="hidden items-center gap-2.5 sm:flex">

@@ -2,7 +2,7 @@
 
 > Self-contained handover for any future Claude / Codex agent. Read it fully before doing anything.
 > Update it after EVERY implementation iteration: keep earlier decisions, correct anything that became outdated, append progress.
-> Last updated: **2026-11-27, with the T4 (report intake UI) implementation patch. T1, T2 and T3 are COMPLETED and merged (owner-confirmed; T3's external configuration was done and its hybrid AI was verified in production). T4 is implemented in a patch; T5 (responder actions and dashboards) is next.**
+> Last updated: **2026-11-28, with the T5 (responder actions and dashboards) implementation patch. T1, T2 and T3 are COMPLETED and merged (owner-confirmed). T4 and T5 are implemented in patches and count as complete only after the owner applies, verifies and merges them. T6 (process, dedupe, escalation) is next.**
 
 ## 0. Handover status at a glance
 
@@ -12,8 +12,9 @@
 | T2 — Canonical schema | **Completed (owner-confirmed 2026-11-25).** Merged into `main` (PR #5, merge commit `4cf75f0`), pushed, deployed on Vercel; updated Firestore rules and indexes deployed to Firebase; production smoke test passed (existing report/SOS flows work, new reports follow the T2 schema, old reports remain readable). Automated T2 checks the owner reported: TypeScript, 39/39 schema/unit tests, 29/29 rules emulator tests, production build. **T2 is closed: do not reopen or modify it.** |
 | T3 — Hybrid AI + App Check | **Completed (owner-confirmed 2026-11-27).** Merged; Firebase AI Logic, Gemini Developer API, App Check, reCAPTCHA Enterprise and the Vercel production environment are configured; local, production, emulator and CLI checks passed; hybrid AI verified in production. **T3 is closed: do not reopen it.** Section 15 is the T3 record. |
 | T4 — Report intake UI | **Implemented in a patch (2026-11-27; baseline = the owner's supplied `RapidAID-T4-source.zip`, stated to be in sync with GitHub `main`; the commit hash was not verified).** Counts as COMPLETED only after the owner applies it, runs the owner checks in section 16.7, and merges it. Section 16 is the T4 record. |
-| T5 — Responder actions and dashboards | **Next.** Starting points: `T5_HANDOFF.md` and section 16.8. |
-| T6 onwards | Pending |
+| T5 — Responder actions and dashboards | **Implemented in a patch (2026-11-28; baseline = the owner's supplied `RapidAID-T5-source.zip`, stated to be in sync with GitHub `main`; no `.git` in the ZIP, so no commit hash is claimed).** Counts as COMPLETED only after the owner applies it, runs the owner checks in section 20.6, and merges it. It assumes T4 is merged (the ZIP already contained T4). Section 20 is the T5 record. |
+| T6 — Process (dedupe), escalation, real Escalation Watch | **Next.** Starting point: `T6_HANDOFF.md` and section 20.8. |
+| T7 onwards | Pending |
 
 - Baseline for the T3 patch (historical): GitHub `main` at commit **`4cf75f0`** (`Merge pull request #5 from Swarnabha07/feature/t2-canonical-schema`). The supplied source ZIP matched it (compared ignoring CRLF; the ZIP has no `.git` and omits `.env.example`, which exists on `main`).
 - **Anonymous emergency access exists**: see section 9. Preserve it.
@@ -101,6 +102,19 @@ Key code: `lib/firebase/{config,auth,firestore,ai,messaging,admin,server-auth}.t
 - **D7:** failures are tracked in memory for the current page session only; limitations documented in 16.5.
 - Offline map rule: the form must work with GPS or typed coordinates; never block submission on the map or its tiles; never claim an offline map.
 
+### T5 decisions (owner-approved, 2026-11-28)
+- **D1:** the unsupported rescue "Fire" and "Evacuation" tabs were removed (no invented categories).
+- **D2:** "Mark in progress" was removed: the server has no such action (acknowledge already moves `received` to `in_progress`; a second acknowledge is a 409). The T1 state machine is unchanged.
+- **D3:** assignment is a free-text unit/team name (server `unitName`, 1-80 chars); there is no roster.
+- **D4/D5:** `limit(100)` on the existing `(assignedDashboard, urgencyWeight desc, createdAt desc)` index, with a truncation notice. No new index. No fallback query: a missing index shows an explicit error.
+- **D6:** AI summaries are DEFERRED (no new AI, route, secret or cost in T5).
+- **D7:** both responder maps are one shared read-only Leaflet component (no `react-leaflet`).
+- **D8:** escalation has a required reason and a target urgency that cannot be lower than the current one; verified against `planReportAction` in tests.
+- **D9:** labels are truthful ("Reported urgency", "Priority", "Assigned"); nothing implies AI processing or human confirmation that did not happen.
+- **D10:** watch panels show real elapsed time; policy thresholds are informational ("automatic escalation is not active yet").
+- **D11:** fake badges and the notification dot were removed; the Live indicator reflects snapshot state; unsupported nav/search/notification controls are visibly disabled.
+- **T5/T6 boundary (owner correction):** NO duplicate hiding, merging or suppression in T5. Every loaded report stays visible; SOS reports are never deduplicated. `isDuplicateOf` is only displayed (rescue context link). A test guards this.
+
 ### Audit recommendations (treated as approved unless the owner objects — confirm when each task starts)
 - Escalation (single MVP policy, resolves a documented conflict between the handoff docs): unacknowledged = `status == "received"`; **critical 10 min, high 20 min; 5-minute sweep**; sets `escalated`, `escalatedAt`, `escalationLevel`, high -> critical (weight 3); writes `escalationLog` + activity entry; idempotent via the `escalated` guard. The thresholds now live in `ESCALATION_POLICY` (`lib/constants/report.ts`); T6 must use them and replace the demo thresholds (2/5/10/20) and the non-existent "Medium" level in `escalation-watch.tsx`.
 - SOS with no medical content routes to `rescue`, critical. *(Recommended in the audit; the owner's approval of this specific routing is not separately recorded — reconfirm in T4.)* SOS reports are never auto-merged (rule 17).
@@ -121,8 +135,8 @@ Key code: `lib/firebase/{config,auth,firestore,ai,messaging,admin,server-auth}.t
 | T2 Canonical schema, shared constants/types/validators, indexes, truthful mappers | **Completed; merged (`4cf75f0`), deployed, smoke-tested (owner-confirmed).** |
 | T3 Hybrid AI (official InferenceMode) + App Check | **Completed; merged, configured, verified in production (owner-confirmed 2026-11-27)** (section 15) |
 | T4 Report intake UI (text form, Leaflet location picker, optional AI confirmation, non-blocking submit, real sync states) | **Implemented in a patch (2026-11-27); completed after the owner applies, verifies (16.7) and merges it** (section 16) |
-| T5 Responder actions and dashboards (remove mock fallbacks, surface errors, limits, on-demand summaries) | **next** |
-| T6 Process (dedupe) + escalation route/log + real Escalation Watch | pending |
+| T5 Responder actions and dashboards (real data only, truthful action feedback, `limit(100)`, shared Leaflet map; summaries deferred) | **Implemented in a patch (2026-11-28); completed after the owner applies, verifies (20.6) and merges it** (section 20) |
+| T6 Process (dedupe) + escalation route/log + real Escalation Watch | **next** |
 | T7 Alerts (create form, citizen feed, geoCells, optional FCM) | pending |
 | T8 PWA shell, seed/docs alignment, demo checklist, end-to-end test | pending |
 
@@ -282,7 +296,7 @@ The test file connects to `127.0.0.1:8080` (the port in `firebase.rules-test.jso
 - The deployed rules/indexes/claims/App Check state/billing plan were never inspected by an agent.
 - `processedBy` of existing/seed documents may still be `on-device`/`cloud` (legacy); mappers tolerate it, and describe it only as "as recorded on the report".
 - Old test-account passwords are in the public Git history (section 5) — accepted, rotation deferred.
-- Dashboards still fall back to mock `INCIDENTS`; dialogs close as "success" even when the server rejects (T5). Rescue "fire"/"evac" tabs are mock. The responder dashboards' maps (`LiveMap`, `FieldMap`) are still CSS mocks; Leaflet exists only in the citizen report form (T4). The responder-side map is T5 scope. Escalation Watch/ack watch use demo timers and thresholds; `acknowledgementOverdueBy` shows "Overdue" for any escalated report (T5/T6).
+- **T5 resolved** the former mock dashboards: mock `INCIDENTS`/teams/role views, fake stats/activity, optimistic "success" on rejected actions, CSS mock maps and demo timers are gone (section 20). Remaining responder limits are in 20.7 (no roster, no notifications, inert nav/search, no recovery of stale cache on sign-out, summaries deferred, acknowledgement/escalation automation is T6).
 - `GET /api/alerts` is public and returns `createdBy`/`createdByName`; `POST /api/alerts` still accepts a caller-supplied `alertId`/`active`; no alert creation UI, no citizen alert feed (T7).
 - No server-side rate limiting; anonymous report creation is unauthenticated spam-capable beyond the rules' shape checks. **T3 adds App Check for AI Logic only** (enforcement is a console step, 15.8); App Check is deliberately NOT enforced for Firestore/Auth (it would break anonymous SOS and offline writes).
 - **T4 limits:** see 16.5 (session-only failure tracking, no recovery of a write the server rejects after a reload, anonymous sign-in needs one online visit, OSM tiles need a connection, no map download for offline).
@@ -308,19 +322,19 @@ The test file connects to `127.0.0.1:8080` (the port in `firebase.rules-test.jso
 ### Five-day plan (dependency-ordered; prioritise working end-to-end features over extras)
 - **Day 1 — Security foundation:** T1 security lockdown (done) and T2 canonical schema (done).
 - **Day 2 — Report intake:** T3 App Check and hybrid AI module (done), then T4 report intake UI (done in a patch: text form, non-blocking `submitReport`, truthful badges, Leaflet picker, optional AI).
-- **Day 3 — Responder side:** T5 actions via server routes, remove mock fallbacks and surface errors, queue limits, on-demand cloud summaries.
+- **Day 3 — Responder side:** T5 actions via server routes, remove mock fallbacks and surface errors, queue limits, shared responder map (done in a patch; on-demand summaries deferred).
 - **Day 4 — Automation:** T6 process (dedupe) and escalation route/log, real Escalation Watch; start of T8 (service worker for the app shell).
 - **Day 5 — Alerts and polish/buffer:** T7 alert form and feed, optional FCM; T8 seed and docs alignment, end-to-end test in desktop Chrome with Nano plus offline mode, demo script. Day 5 is also the buffer.
 - **If days run short, cut in this order:** 1. FCM push. 2. Voice note. 3. PWA shell polish. 4. Summaries beyond critical reports.
 - *(Calendar days are indicative; the hackathon deadline was not verified.)*
-- Phase sequence: T1 Security lockdown (complete) -> T2 Canonical schema (complete) -> T3 Hybrid AI and App Check (complete) -> **T4 Report intake UI (implemented in a patch)** -> T5 Responder actions and dashboards (next) -> T6 Process and escalation -> T7 Alerts -> T8 Offline shell and docs.
+- Phase sequence: T1 Security lockdown (complete) -> T2 Canonical schema (complete) -> T3 Hybrid AI and App Check (complete) -> T4 Report intake UI (implemented in a patch) -> **T5 Responder actions and dashboards (implemented in a patch)** -> T6 Process and escalation (next) -> T6 Process and escalation -> T7 Alerts -> T8 Offline shell and docs.
 
 ### Iterations — one prompt and one patch each
 **T1 — Security lockdown** — *Completed (section 7).*
 **T2 — Canonical schema** — *Completed, merged, deployed, smoke-tested (section 13).*
 **T3 — Hybrid AI and App Check** — *Completed, merged, configured, verified in production (section 15).*
 **T4 — Report intake UI** — *Implemented in a patch (2026-11-27); record in section 16; completed after the owner applies, verifies and merges it. Delivered: full free-text form, Leaflet location picker, optional per-field AI confirmation, non-blocking `submitReport`, real pending/synced/failed states, SOS/Quick Start made non-blocking with unchanged payloads.*
-**T5 — Responder actions and dashboards** — real data only (remove mock `INCIDENTS` fallbacks and simulated operational data), surface action failures instead of showing success, queue limits (`limit(100)`) and filters (hide duplicates), on-demand cloud summaries only when justified and within free-tier limits, role-based access enforced server-side. Depends on T1, T2, T3. Do not weaken the T1 server checks.
+**T5 — Responder actions and dashboards** — *Implemented in a patch (2026-11-28); record in section 20; completed after the owner applies, verifies and merges it. Delivered: real data only, honest loading/empty/error/offline states, server-rejection feedback in every dialog, `limit(100)` with a truncation notice, one shared read-only Leaflet map, truthful labels and derived panels. Deferred by decision: on-demand AI summaries (20.5). NOT done by design: dedupe/filtering of duplicates (T6).*
 **T6 — Process and escalation** — secure process/dedupe route (same category, <=30 min, <=0.5 km; `processedAt` guard; transaction; atomic `peopleAffected` increment; audit trail; **SOS never auto-merged**; human review for uncertain duplicates); escalation route + auditable `escalationLog` (`type:"auto"`, actor `system_timeout`); real Escalation Watch driven by `ESCALATION_POLICY`; scheduled execution only if a genuine secure free-tier mechanism exists. Depends on T2 (constants, indexes), T5. Any cron route needs a secret and an honest description (Vercel Hobby cron limits were not verified).
 **T7 — Alerts** — alert creation form; citizen feed (Firestore listener on unexpired alerts, works from cache); `geoCells` (coarse cells + exact Haversine, radius cap 25 km); optional FCM; alert writes via `POST /api/alerts`; harden the public GET and caller-supplied `alertId`/`active`. No claim that anyone was notified unless delivery is confirmed.
 **T8 — Offline shell and documentation** — minimal service worker + manifest (no new package; cache only safe static assets; never private API/auth/user responses); update the seed script to the canonical schema (still dev-project-only); correct README/documentation; demo checklist; desktop-Chrome end-to-end run with Nano and offline sync recovery. *T8 is the later offline-shell/PWA and documentation phase; it stays separate from T3 and T4, and PWA polish is on the cut list above.*
@@ -556,7 +570,7 @@ Citizen `/home` now has: a **full free-text report form** with a **Leaflet locat
 7. Optional: force a failure (for example sign out in another tab) and confirm "Failed" + Retry creates no duplicate.
 
 ### 16.8 Open items and recommended T5 starting points
-- T5 owns: responder dashboards still use mock fallbacks and report success when the server rejects; `LiveMap`/`FieldMap` are CSS mocks (Leaflet can be reused via a shared map component, but keep the citizen picker separate); `limit(100)`; filters; summaries.
+- (Historical: T5 delivered the dashboards, map, limit and error handling listed here; summaries were deferred. See section 20.)
 - Owner decisions still open: SOS category routing (D4), Option B provenance (needs a rules change; not needed so far), removing `/ai-check` later, rotating old test passwords.
 - Deferred: dedupe/escalation (T6), alerts (T7), PWA shell/seed/docs alignment (T8).
 
@@ -567,6 +581,7 @@ Citizen `/home` now has: a **full free-text report form** with a **Leaflet locat
 - Keep demo data simulated; never commit credentials or service-account files.
 - Avoid `pkill -f` patterns that can match your own shell command line (this killed a shell once during T1).
 - The sandbox used by previous agents could `npm ci`, run `tsc`, `eslint`, `next build` and `tsx --test`, and could install `firebase-tools`, but could NOT download the Firestore emulator JAR (blocked host) and could read GitHub only through `git clone` (the REST API and the fetch tool were rate-limited).
+- T5 notes: responder UI must stay free of sample data (`tests/responder/no-mock-data.test.ts` guards it, including "no duplicate hiding" until T6); a `next/dynamic` map must live in a Client Component; do not symlink `node_modules` when building in a scratch copy (Turbopack cannot resolve it).
 - Information in this document that could not be verified is marked as such. If you find a conflict between this file and the repository, record both facts and ask the owner instead of silently choosing.
 
 
@@ -586,3 +601,58 @@ Citizen `/home` now has: a **full free-text report form** with a **Leaflet locat
 - **Environment (`.env.example`):** `NEXT_PUBLIC_FIREBASE_*` (public web config); `NEXT_PUBLIC_GEMINI_MODEL`; `NEXT_PUBLIC_APPCHECK_RECAPTCHA_SITE_KEY`; server-only `FIREBASE_SERVICE_ACCOUNT_KEY` or `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY` (Vercel / `.env.local`, never `NEXT_PUBLIC_`). Redeploy Vercel after any `NEXT_PUBLIC_*` change.
 - **Firebase Console prerequisites:** Firestore, Authentication (email, Google, **anonymous**), AI Logic (Gemini Developer API), App Check (reCAPTCHA Enterprise web app + debug token for localhost; enforce for AI Logic only), published Firestore rules and indexes from the repo (T2, deployed). Elevated roles only via `scripts/set-role.mjs` (section 5).
 - **Deployment steps:** apply patch on a branch -> verification loop (section 11 and 15.7) -> owner console steps (15.8) -> Vercel env + deploy -> smoke test -> merge. Rules/index changes (when a future task has them) follow the order in section 13.
+
+## 20. T5 — Responder actions and dashboards: what the patch implements
+
+### 20.1 Objective and result
+Make both responder dashboards truthful and functional without redesigning them: real Firestore data only, honest states, action failures that cannot look like success, a bounded queue, a real read-only map. No rules, indexes, API routes, auth, Firebase/Vercel config, dependencies, citizen code or env vars changed. The server contract (`PATCH /api/reports/[id]`, `planReportAction`) is unchanged; tests feed every UI payload to the real validator.
+
+### 20.2 Files (baseline: the supplied ZIP, LF-normalised in the scratch repo; no commit hash claimed)
+- **New pure modules (no Firebase/React; unit-tested):** `lib/utils/responder-view.ts` (queue limit constant, summaries, elapsed/ago labels, activity feed, queue reducer and error descriptions, live-state), `lib/utils/action-errors.ts` (`ResponderActionError`, status-to-message mapping, `responderLabel`), `lib/utils/report-action-client.ts` (`performReportAction`: injected token/fetch, one 401 retry with forced refresh), `lib/utils/report-action-payloads.ts` (request bodies, `escalationTargets`, input limits), `lib/utils/map-pins.ts`.
+- **New hooks:** `lib/hooks/use-responder-queue.ts`, `use-now.ts`, `use-action-submit.ts`.
+- **New components:** `components/responder/{incident-map,map-frame,queue-state}.tsx`.
+- **Modified:** `lib/firebase/firestore.ts` (one shared listener with `limit(100)` and `includeMetadataChanges`, no fallback, no `any`; actions throw), `lib/types/report.ts` (mappers), `lib/types/incident.ts` and `lib/types/rescue.ts` (mock data deleted, types extended), both dashboards, queues, detail panel/workspace, all 7 dialogs, both maps, headers, sidebars, stats/overview, watch, activity and team panels, `status-pills.tsx`; README/documentation (one stale line each); tests.
+- **Deleted:** `components/rescue/role-view-tabs.tsx`; `T5_HANDOFF.md` (superseded by `T6_HANDOFF.md`).
+- **Tests added:** `tests/responder/*` (34) and 7 mapper tests (total 153 = 112 + 41).
+
+### 20.3 Architecture
+- **Queues:** `subscribeToMedicalQueue/RescueQueue(callback(items, meta), onError)` share `subscribeToDashboardQueue`: `where(assignedDashboard) + orderBy(urgencyWeight desc, createdAt desc) + limit(100)`. `meta = {fromCache, truncated (>=100 docs), skipped (documents that failed to map)}`. A malformed document is skipped and counted, not fatal. `useResponderQueue` exposes loading / ready / error; an error clears the rows. Selection is derived (never stored), so it falls back to the first incident.
+- **No optimistic updates:** dialogs call the server; only a 2xx closes them (`onSuccess`); the live snapshot updates the UI. Errors stay in the dialog (`ActionAlert`) with the form preserved; Esc/backdrop/Cancel are ignored while a request is in flight.
+- **Error mapping:** 401 -> sign in again (after one forced-refresh retry); 403 -> server message; 409 -> "report changed" with the server detail; 400/413 -> server message; 404; 5xx and network failures never claim the action was or was not applied.
+- **Identity shown = identity recorded:** `responderLabel(user, role)` mirrors the server's `resolveActorName` (token name, else e-mail prefix, else role). The Firestore profile mirror is not used.
+- **Payloads (verified against `planReportAction`):** acknowledge `{action, note?}`; assign `{action, unitName(1-80), note?}`; escalate `{action, urgency in high|critical and >= current, reason(3-500)}`; resolve `{action, resolutionNote(3-1000)}`. Acknowledge is enabled only for `status === received` (`awaitingAcknowledgement`).
+- **Derived panels:** stats, units, activity and watch panels are computed from loaded reports (counts say they cover loaded reports). Elapsed time uses `createdAt`; `useNow` ticks every 15 s. Policy thresholds come from `ESCALATION_POLICY`, labelled informational.
+- **Map:** `MapFrame` (`next/dynamic`, `ssr:false`, error boundary, empty/no-coordinate/tiles-unavailable/offline notices) wraps `IncidentMap` (Leaflet imperative, markers diffed by id, fit-to-pins once, pan to an off-screen selection, `isolate` so Leaflet panes never cover modals, tile `maxZoom` 17, OSM attribution, no prefetch). Leaflet CSS is imported inside the dynamic chunk (the prerendered `/dashboard` and `/rescue` HTML contain no Leaflet). The citizen picker is untouched.
+- **Truthful UI:** no "AI urgency", "Human-confirmed", "En route", fabricated names/places, canned dialog text, pre-ticked confirmations, or "notifies" claims. `dispatched` shows as "Assigned". Rescue `normal` shows "Normal" (there is no "Medium"). A stored triage note is shown only when one exists.
+
+### 20.4 Safety and boundaries kept
+Server-side authorization untouched; no Admin SDK in client code; no direct report writes; SOS is displayed with an SOS marker and never filtered, merged or suppressed; `isDuplicateOf` is displayed only; no automatic escalation, dedupe, acknowledgement timers or processing; no storage use in responder code; Spark-only.
+
+### 20.5 AI summaries — deferred (decision D6) and why
+No server-side Gemini exists (no key; none may be added). A summary would run in the responder's browser through AI Logic with App Check and send victim text to the free tier (data-use terms unverified). Reports are at most 1000 characters, so the gain is marginal; responders cannot store a result without a new server route and a provenance decision; Vercel Previews get no App Check token. Revisit after T6, only as an optional, labelled, click-to-run, transient feature.
+
+### 20.6 Verification
+**Executed by the agent (scratch Linux clone of the supplied ZIP, normalised to LF, `npm ci`, 2026-11-28):**
+- Baseline before changes: `tsc` clean; 112/112 tests; ESLint 22 errors / 10 warnings (matched the T4 record).
+- After the patch: `tsc --noEmit` clean; **153/153** tests (`tests/ai`, `security`, `schema`, `citizen`, `responder`); ESLint **10 errors / 10 warnings** (the 12 `any` errors in `firestore.ts` are gone; no new warnings; remaining errors are pre-existing in `app/api/alerts`, login, citizen quick-start and `messaging.ts`); `next build` with placeholder Firebase env succeeds; prerendered `/dashboard` and `/rescue` HTML contain no Leaflet and no sample data; the responder map is a separate client chunk.
+- `git apply --check --ignore-whitespace` against a fresh CRLF copy of the baseline.
+**NOT executed by the agent (needs the owner's environment):** the rules emulator (rules unchanged), any browser run, real Firebase/Auth/claims, production Vercel, a mobile run, visual review of the maps, a second-tab conflict test.
+**Owner checks (about 20 minutes; desktop Chrome + one phone):**
+1. Sign in as the medical and rescue test accounts; with an empty queue confirm real empty states and no sample rows or names.
+2. Submit SOS, Quick Start and a full report; confirm each appears on the right dashboard with a pin and the SOS marker.
+3. Acknowledge, assign (free-text unit), escalate (reason, target) and resolve; confirm the dialog closes only on success and the row updates from the live feed.
+4. Force a rejection (acknowledge the same report in two tabs; or act as the wrong role) and confirm the message and that the dialog stays open with its text.
+5. Go offline in DevTools: the header should say saved data, the notice should appear, and actions should fail honestly.
+6. Confirm the maps load tiles, select a pin and a row both ways, and that an open dialog is not covered by the map.
+7. If you have more than 100 reports in a queue, confirm the truncation notice.
+
+### 20.7 Limitations (read before touching responders)
+- No roster/availability/notifications; unit names are free text. Nav items, header search and notifications are visibly disabled, not implemented.
+- `limit(100)` follows urgency order, so resolved high-urgency reports occupy slots; a status-aware index would fix it (needs an owner-deployed index change).
+- If the index is missing the dashboards show an error (by decision) instead of data.
+- Firestore's persistent cache is not cleared on sign-out (shared devices); OSM tile requests reveal approximate viewed areas to OSM (zoom capped at 17).
+- Counts are for loaded reports only. "Awaiting acknowledgement" means `status === received` (the policy's definition).
+- Report `aiTriageSummary`/`aiTriageLabel`/`reviewedBy`/`priorityConfirmedBy` may exist on legacy documents; only a stored triage summary is displayed (as "Stored triage note").
+
+### 20.8 Open items and T6 starting points
+See `T6_HANDOFF.md`. Owner decisions still open: SOS category routing (D4), Option B provenance, removing `/ai-check`, rotating old test passwords, deployment state of rules/indexes/App Check (never inspected by an agent).
