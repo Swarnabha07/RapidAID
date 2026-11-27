@@ -213,10 +213,10 @@ RapidAID combines local intelligence with cloud-based reasoning to maintain func
 | **Database** | Cloud Firestore |
 | **Authentication** | Firebase Authentication |
 | **Security** | Firebase App Check, Firestore Security Rules |
-| **Offline Support** | Service Workers, PWA, local storage queue |
+| **Offline Support** | Firestore offline persistence (IndexedDB write queue). Service worker / PWA app shell: planned (T8) |
 | **Notifications** | Firebase Cloud Messaging |
 | **Backend Automation** | Firebase Cloud Functions |
-| **Maps** | Leaflet |
+| **Maps** | Leaflet + OpenStreetMap tiles (citizen report location picker; responder dashboard maps are still mocks) |
 | **Configuration** | Firebase Remote Config |
 | **Deployment** | Vercel, Firebase |
 

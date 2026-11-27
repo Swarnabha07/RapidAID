@@ -458,12 +458,27 @@ export function mapReportToRescueIncident(report: Report): RescueIncident {
 }
 
 /**
- * Maps a Firestore Report document to the CitizenRequest interface expected by Citizen Portal.
+ * Snapshot metadata for one report document (Firestore `docSnap.metadata`). When supplied it is
+ * the authoritative sync signal: a document with a pending write exists only on this device.
  */
-export function mapReportToCitizenRequest(report: Report): CitizenRequest {
+export interface ReportSyncMeta {
+  hasPendingWrites: boolean;
+}
+
+/**
+ * Maps a Firestore Report document to the CitizenRequest interface expected by Citizen Portal.
+ *
+ * Without `meta` (legacy callers/tests) sync is inferred from `syncedAt`. With `meta` (T4) it comes
+ * from Firestore itself: pending write => "Pending sync", otherwise the server has the document.
+ */
+export function mapReportToCitizenRequest(report: Report, meta?: ReportSyncMeta): CitizenRequest {
   const hasTeam = Boolean(report.assignedTeamOrUnit);
   const isAck = Boolean(report.acknowledgedAt || report.acknowledgedBy);
   const locationLabel = describeLocation(report.location, "lat-lng");
+
+  const synchronized = meta ? !meta.hasPendingWrites : Boolean(report.syncedAt);
+  const syncedAtMs =
+    synchronized && report.syncedAt ? toDate(report.syncedAt).getTime() : null;
 
   return {
     id: report.reportId,
@@ -471,7 +486,8 @@ export function mapReportToCitizenRequest(report: Report): CitizenRequest {
     location: locationLabel,
     reportedLabel: formatTimeToCitizenLabel(report.createdAt),
     urgency: mapReportUrgencyToCitizen(report.urgency),
-    sync: report.syncedAt ? "Synchronized" : "Pending sync",
+    sync: synchronized ? "Synchronized" : "Pending sync",
     status: mapReportStatusToCitizenStatus(report.status, hasTeam, isAck),
+    syncedAtMs,
   };
 }

@@ -2,7 +2,7 @@
 
 > Self-contained handover for any future Claude / Codex agent. Read it fully before doing anything.
 > Update it after EVERY implementation iteration: keep earlier decisions, correct anything that became outdated, append progress.
-> Last updated: **2026-11-25, with the T3 (hybrid AI + App Check) implementation patch. T1 and T2 are COMPLETED, merged, deployed and production-smoke-tested (owner-confirmed). T3 is implemented in a patch; T4 (report intake UI) is next.**
+> Last updated: **2026-11-27, with the T4 (report intake UI) implementation patch. T1, T2 and T3 are COMPLETED and merged (owner-confirmed; T3's external configuration was done and its hybrid AI was verified in production). T4 is implemented in a patch; T5 (responder actions and dashboards) is next.**
 
 ## 0. Handover status at a glance
 
@@ -10,15 +10,16 @@
 |---|---|
 | T1 — Security lockdown | **Completed.** Merged into `main` (`bf723f2`). Owner-confirmed Vercel Preview test and Firestore rules emulator run (see section 7). |
 | T2 — Canonical schema | **Completed (owner-confirmed 2026-11-25).** Merged into `main` (PR #5, merge commit `4cf75f0`), pushed, deployed on Vercel; updated Firestore rules and indexes deployed to Firebase; production smoke test passed (existing report/SOS flows work, new reports follow the T2 schema, old reports remain readable). Automated T2 checks the owner reported: TypeScript, 39/39 schema/unit tests, 29/29 rules emulator tests, production build. **T2 is closed: do not reopen or modify it.** |
-| T3 — Hybrid AI + App Check | **Implemented in a patch (2026-11-25, baseline `main@4cf75f0`).** It counts as COMPLETED only after the owner applies it, runs the verification in section 15.7, completes the Firebase/Vercel steps in section 15.8, and merges it. Section 15 is the T3 record. |
-| T4 — Report intake UI | **Next.** Scope and the T3 interface contract are in section 16. **No T4 patch existed in the supplied materials** (section 16). |
-| T5 onwards | Pending |
+| T3 — Hybrid AI + App Check | **Completed (owner-confirmed 2026-11-27).** Merged; Firebase AI Logic, Gemini Developer API, App Check, reCAPTCHA Enterprise and the Vercel production environment are configured; local, production, emulator and CLI checks passed; hybrid AI verified in production. **T3 is closed: do not reopen it.** Section 15 is the T3 record. |
+| T4 — Report intake UI | **Implemented in a patch (2026-11-27; baseline = the owner's supplied `RapidAID-T4-source.zip`, stated to be in sync with GitHub `main`; the commit hash was not verified).** Counts as COMPLETED only after the owner applies it, runs the owner checks in section 16.7, and merges it. Section 16 is the T4 record. |
+| T5 — Responder actions and dashboards | **Next.** Starting points: `T5_HANDOFF.md` and section 16.8. |
+| T6 onwards | Pending |
 
-- Baseline for the T3 patch: GitHub `main` at commit **`4cf75f0`** (`Merge pull request #5 from Swarnabha07/feature/t2-canonical-schema`). The supplied source ZIP matched it (compared ignoring CRLF; the ZIP has no `.git` and omits `.env.example`, which exists on `main`).
+- Baseline for the T3 patch (historical): GitHub `main` at commit **`4cf75f0`** (`Merge pull request #5 from Swarnabha07/feature/t2-canonical-schema`). The supplied source ZIP matched it (compared ignoring CRLF; the ZIP has no `.git` and omits `.env.example`, which exists on `main`).
 - **Anonymous emergency access exists**: see section 9. Preserve it.
 - **Firestore rules and indexes (T2) were deployed by the owner** after merge (owner-confirmed). The agent cannot read the deployed state. **T3 changes neither rules nor indexes.**
 - **Test accounts are retained** (owner decision, section 5). Do **not** delete them or rotate their passwords unless the owner explicitly approves.
-- **AI suggestions exist only as a client-side advisory module (T3) with an admin-only diagnostics page.** No report is ever stored as AI-processed: every report is still `processedBy: "manual"`, `confidenceScore: null` (decision D1-A, section 3). The legacy `lib/firebase/ai.ts` was deleted in T3.
+- **AI suggestions are a client-side advisory module (T3). T4 uses it in the full report form only (optional, per-field confirmation); one-tap SOS and Quick Start never touch AI. `/ai-check` stays admin-only.** No report is ever stored as AI-processed: every report is still `processedBy: "manual"`, `confidenceScore: null` (decision D1-A, section 3). The legacy `lib/firebase/ai.ts` was deleted in T3.
 
 ## 1. Global rules for every future agent (prominent — follow all of them)
 
@@ -30,7 +31,7 @@
 6. **Include the updated `AGENT_IMPLEMENTATION_CONTEXT.md` in every implementation patch** (re-created as a coherent whole, not just appended).
 7. **Never** commit, push, deploy, change Firebase project settings, alter accounts, or run destructive commands.
 8. Preserve the existing architecture and UI unless the approved scope requires a change. No redesign.
-9. No unnecessary dependencies and no package upgrades. (`@firebase/rules-unit-testing` is an existing devDependency, added by the owner in `39dfc47`; do not add others.)
+9. No unnecessary dependencies and no package upgrades. (`@firebase/rules-unit-testing` is an existing devDependency, added by the owner in `39dfc47`. T4 added, with owner approval, exactly `leaflet@1.9.4` and `@types/leaflet@1.9.23`, both pinned; the lockfile also gained the transitive `@types/geojson`. Do not add others without approval; `react-leaflet` was deliberately NOT added.)
 10. **Firebase Spark (free) plan only.** No Blaze upgrade, no Cloud Functions, no paid scheduler, no paid services, no Cloud Storage. (Linking billing would also end the Gemini Developer API free tier.) No Gemini API key and no other new secret: Firebase AI Logic uses a Google-managed service account behind the Firebase project, and the web `apiKey` only identifies the project.
 11. **Do not invent** test results, credentials, data, deployment status or features. Never claim a test passed unless it was actually run; say plainly what was NOT run. Separate: *executed by the agent*, *owner-confirmed*, *not run*.
 12. **Never print, request, commit or include** `.env.local`, service-account JSON, private keys, tokens or passwords (in answers, patches or this file).
@@ -90,6 +91,16 @@ Key code: `lib/firebase/{config,auth,firestore,ai,messaging,admin,server-auth}.t
 - **Free tier only:** Spark, Gemini free tier, no Blaze, no Cloud Functions, no Gemini API key.
 
 
+### T4 decisions (owner-approved, 2026-11-27)
+- **D1 kept:** AI provenance unchanged: reports stay `processedBy: "manual"`, `confidenceScore: null`; no `aiAssist` block; no rules change.
+- **D2:** add only `leaflet` and `@types/leaflet`; no React Leaflet.
+- **D3:** OpenStreetMap standard tiles with attribution, following OSM's public tile usage policy; no offline tile download, prefetch or bulk caching.
+- **D4:** SOS category/urgency/description unchanged (`medical`, `critical`, canned text). The audit's "route content-free SOS to rescue" is still NOT applied: T5/T6 may revisit it only with owner approval.
+- **D5:** `/ai-check` stays admin-only.
+- **D6:** fake citizen history rows removed; a real empty state is shown.
+- **D7:** failures are tracked in memory for the current page session only; limitations documented in 16.5.
+- Offline map rule: the form must work with GPS or typed coordinates; never block submission on the map or its tiles; never claim an offline map.
+
 ### Audit recommendations (treated as approved unless the owner objects — confirm when each task starts)
 - Escalation (single MVP policy, resolves a documented conflict between the handoff docs): unacknowledged = `status == "received"`; **critical 10 min, high 20 min; 5-minute sweep**; sets `escalated`, `escalatedAt`, `escalationLevel`, high -> critical (weight 3); writes `escalationLog` + activity entry; idempotent via the `escalated` guard. The thresholds now live in `ESCALATION_POLICY` (`lib/constants/report.ts`); T6 must use them and replace the demo thresholds (2/5/10/20) and the non-existent "Medium" level in `escalation-watch.tsx`.
 - SOS with no medical content routes to `rescue`, critical. *(Recommended in the audit; the owner's approval of this specific routing is not separately recorded — reconfirm in T4.)* SOS reports are never auto-merged (rule 17).
@@ -108,9 +119,9 @@ Key code: `lib/firebase/{config,auth,firestore,ai,messaging,admin,server-auth}.t
 |---|---|
 | T1 Security lockdown | **Completed; merged into `main`.** Owner-confirmed Preview test + rules emulator run. |
 | T2 Canonical schema, shared constants/types/validators, indexes, truthful mappers | **Completed; merged (`4cf75f0`), deployed, smoke-tested (owner-confirmed).** |
-| T3 Hybrid AI (official InferenceMode) + App Check | **Implemented in a patch (baseline `4cf75f0`); completed after the owner applies, verifies, configures and merges it (section 15).** |
-| T4 Report intake UI (text form, SOS fixes, non-blocking submit, pending/synced/failed) | **next** (section 16) |
-| T5 Responder actions and dashboards (remove mock fallbacks, surface errors, limits, on-demand summaries) | pending |
+| T3 Hybrid AI (official InferenceMode) + App Check | **Completed; merged, configured, verified in production (owner-confirmed 2026-11-27)** (section 15) |
+| T4 Report intake UI (text form, Leaflet location picker, optional AI confirmation, non-blocking submit, real sync states) | **Implemented in a patch (2026-11-27); completed after the owner applies, verifies (16.7) and merges it** (section 16) |
+| T5 Responder actions and dashboards (remove mock fallbacks, surface errors, limits, on-demand summaries) | **next** |
 | T6 Process (dedupe) + escalation route/log + real Escalation Watch | pending |
 | T7 Alerts (create form, citizen feed, geoCells, optional FCM) | pending |
 | T8 PWA shell, seed/docs alignment, demo checklist, end-to-end test | pending |
@@ -263,7 +274,7 @@ The test file connects to `127.0.0.1:8080` (the port in `firebase.rules-test.jso
 
 
 ### General verification loop for every iteration
-`npm ci` -> `npx tsc --noEmit` -> `npx eslint .` (must not exceed 34 errors / 10 warnings; do not add findings) -> `npm run build` (dummy `NEXT_PUBLIC_FIREBASE_*` env if needed) -> `npx --yes tsx --test tests/security/*.test.ts tests/schema/*.test.ts` plus any new tests -> the rules emulator command whenever `firestore.rules` changes -> `git diff --check`. Report honestly what was NOT run.
+`npm ci` -> `npx tsc --noEmit` -> `npx eslint .` (current baseline after T4: **22 errors / 10 warnings**; must not exceed it, do not add findings) -> `npm run build` (dummy `NEXT_PUBLIC_FIREBASE_*` env if needed) -> `npx --yes tsx --test tests/ai/*.test.ts tests/security/*.test.ts tests/schema/*.test.ts tests/citizen/*.test.ts` (112 tests after T4) plus any new tests -> the rules emulator command whenever `firestore.rules` changes -> `git diff --check`. Report honestly what was NOT run.
 
 ## 12. Remaining issues and known limitations
 
@@ -271,10 +282,10 @@ The test file connects to `127.0.0.1:8080` (the port in `firebase.rules-test.jso
 - The deployed rules/indexes/claims/App Check state/billing plan were never inspected by an agent.
 - `processedBy` of existing/seed documents may still be `on-device`/`cloud` (legacy); mappers tolerate it, and describe it only as "as recorded on the report".
 - Old test-account passwords are in the public Git history (section 5) — accepted, rotation deferred.
-- Dashboards still fall back to mock `INCIDENTS`; dialogs close as "success" even when the server rejects (T5). Rescue "fire"/"evac" tabs are mock. Maps are visual mocks (no Leaflet). Escalation Watch/ack watch use demo timers and thresholds; `acknowledgementOverdueBy` shows "Overdue" for any escalated report (T5/T6).
+- Dashboards still fall back to mock `INCIDENTS`; dialogs close as "success" even when the server rejects (T5). Rescue "fire"/"evac" tabs are mock. The responder dashboards' maps (`LiveMap`, `FieldMap`) are still CSS mocks; Leaflet exists only in the citizen report form (T4). The responder-side map is T5 scope. Escalation Watch/ack watch use demo timers and thresholds; `acknowledgementOverdueBy` shows "Overdue" for any escalated report (T5/T6).
 - `GET /api/alerts` is public and returns `createdBy`/`createdByName`; `POST /api/alerts` still accepts a caller-supplied `alertId`/`active`; no alert creation UI, no citizen alert feed (T7).
 - No server-side rate limiting; anonymous report creation is unauthenticated spam-capable beyond the rules' shape checks. **T3 adds App Check for AI Logic only** (enforcement is a console step, 15.8); App Check is deliberately NOT enforced for Firestore/Auth (it would break anonymous SOS and offline writes).
-- AI: the T3 module exists but **no UI uses it yet except `/ai-check`**. There is still no free-text report form (the quick-start card submits a canned description; the SOS card hard-codes category `medical` and a canned description); offline `await setDoc` blocks the UI, and `SyncStatusCard` is a hard-coded "connected / all synchronized" display (T4).
+- **T4 limits:** see 16.5 (session-only failure tracking, no recovery of a write the server rejects after a reload, anonymous sign-in needs one online visit, OSM tiles need a connection, no map download for offline).
 - FCM: `requestPushPermission` is never called, no VAPID key in `.env.example`, a single `fcmToken` per user, and the service worker pins Firebase 10.13 compat while the app uses 13.3 (T7).
 - Seed data uses the legacy schema (numeric `confidenceScore`, `on-device`/`cloud`); the script is intentionally unsafe to run on production (T8).
 - Docs vs code drift: README/documentation claim Gemini Nano 4, Leaflet, shadcn, Framer Motion, next-pwa, Remote Config (T8). The handoff doc's AI function signatures differ from the code. T3 corrected the setup/App Check/AI text in README and documentation.md only where it was wrong or contradicted the free-tier rule; the broader cleanup remains T8.
@@ -296,25 +307,27 @@ The test file connects to `127.0.0.1:8080` (the port in `firebase.rules-test.jso
 
 ### Five-day plan (dependency-ordered; prioritise working end-to-end features over extras)
 - **Day 1 — Security foundation:** T1 security lockdown (done) and T2 canonical schema (done).
-- **Day 2 — Report intake:** T3 App Check and hybrid AI module (implemented in a patch), then T4 report intake UI (text form, non-blocking `createReport`, truthful badges, SOS fixes).
+- **Day 2 — Report intake:** T3 App Check and hybrid AI module (done), then T4 report intake UI (done in a patch: text form, non-blocking `submitReport`, truthful badges, Leaflet picker, optional AI).
 - **Day 3 — Responder side:** T5 actions via server routes, remove mock fallbacks and surface errors, queue limits, on-demand cloud summaries.
 - **Day 4 — Automation:** T6 process (dedupe) and escalation route/log, real Escalation Watch; start of T8 (service worker for the app shell).
 - **Day 5 — Alerts and polish/buffer:** T7 alert form and feed, optional FCM; T8 seed and docs alignment, end-to-end test in desktop Chrome with Nano plus offline mode, demo script. Day 5 is also the buffer.
 - **If days run short, cut in this order:** 1. FCM push. 2. Voice note. 3. PWA shell polish. 4. Summaries beyond critical reports.
 - *(Calendar days are indicative; the hackathon deadline was not verified.)*
-- Phase sequence: T1 Security lockdown (complete) -> T2 Canonical schema (complete) -> **T3 Hybrid AI and App Check (implemented in a patch)** -> T4 Report intake UI (next) -> T5 Responder actions and dashboards -> T6 Process and escalation -> T7 Alerts -> T8 Offline shell and docs.
+- Phase sequence: T1 Security lockdown (complete) -> T2 Canonical schema (complete) -> T3 Hybrid AI and App Check (complete) -> **T4 Report intake UI (implemented in a patch)** -> T5 Responder actions and dashboards (next) -> T6 Process and escalation -> T7 Alerts -> T8 Offline shell and docs.
 
 ### Iterations — one prompt and one patch each
 **T1 — Security lockdown** — *Completed (section 7).*
 **T2 — Canonical schema** — *Completed, merged, deployed, smoke-tested (section 13).*
-**T3 — Hybrid AI and App Check** — *Implemented in a patch (2026-11-25); record in section 15; completed after the owner applies, verifies, configures and merges it.*
-**T4 — Report intake UI** — text report form (description, language, category, people affected, injuries, optional accessConditions); correct SOS category and location handling; non-blocking offline-first submission (do not `await` server acknowledgement; use snapshot `hasPendingWrites` for pending/synced); clear pending, synced and failed states; truthful AI processing indicators; remove hard-coded "connected/synchronized" wording; preserve the existing design. Depends on T2, T3. Keep the Firestore-client create path and rules; update the rules' create shape in lock-step if the payload changes. *Next. Scope, deliverables and the T3 interface contract: section 16.*
+**T3 — Hybrid AI and App Check** — *Completed, merged, configured, verified in production (section 15).*
+**T4 — Report intake UI** — *Implemented in a patch (2026-11-27); record in section 16; completed after the owner applies, verifies and merges it. Delivered: full free-text form, Leaflet location picker, optional per-field AI confirmation, non-blocking `submitReport`, real pending/synced/failed states, SOS/Quick Start made non-blocking with unchanged payloads.*
 **T5 — Responder actions and dashboards** — real data only (remove mock `INCIDENTS` fallbacks and simulated operational data), surface action failures instead of showing success, queue limits (`limit(100)`) and filters (hide duplicates), on-demand cloud summaries only when justified and within free-tier limits, role-based access enforced server-side. Depends on T1, T2, T3. Do not weaken the T1 server checks.
 **T6 — Process and escalation** — secure process/dedupe route (same category, <=30 min, <=0.5 km; `processedAt` guard; transaction; atomic `peopleAffected` increment; audit trail; **SOS never auto-merged**; human review for uncertain duplicates); escalation route + auditable `escalationLog` (`type:"auto"`, actor `system_timeout`); real Escalation Watch driven by `ESCALATION_POLICY`; scheduled execution only if a genuine secure free-tier mechanism exists. Depends on T2 (constants, indexes), T5. Any cron route needs a secret and an honest description (Vercel Hobby cron limits were not verified).
 **T7 — Alerts** — alert creation form; citizen feed (Firestore listener on unexpired alerts, works from cache); `geoCells` (coarse cells + exact Haversine, radius cap 25 km); optional FCM; alert writes via `POST /api/alerts`; harden the public GET and caller-supplied `alertId`/`active`. No claim that anyone was notified unless delivery is confirmed.
 **T8 — Offline shell and documentation** — minimal service worker + manifest (no new package; cache only safe static assets; never private API/auth/user responses); update the seed script to the canonical schema (still dev-project-only); correct README/documentation; demo checklist; desktop-Chrome end-to-end run with Nano and offline sync recovery. *T8 is the later offline-shell/PWA and documentation phase; it stays separate from T3 and T4, and PWA polish is on the cut list above.*
 
 ## 15. T3 — Hybrid AI and App Check: what the patch implements
+
+> **Status update (2026-11-27): T3 is completed and merged; its external configuration was done and the hybrid AI was verified in production (owner-confirmed).** Sections 15.7-15.8 are kept as the historical checklist.
 
 ### 15.1 Objective and result
 A client-side, **advisory-only** classifier for free-text reports using Firebase AI Logic hybrid inference (on-device Gemini Nano first, Gemini Developer API free tier as fallback), App Check for the cloud path, strict validation of model output against the T2 enums, and an admin-only diagnostics page. It writes **nothing** to Firestore and cannot set `processedBy`/`confidenceScore` (a source-scan test enforces this). The T4 form will consume it.
@@ -481,33 +494,71 @@ T3 = AI module, App Check, provenance handling and its schema/rules/test consequ
 5. **Wait for the owner's explicit approval** before writing implementation code. After approval return **one consolidated unified diff patch** (including the re-created handover).
 6. Never edit the owner's repository directly; never commit, push, merge or deploy without explicit permission.
 
-## 16. T4 — Report intake UI: readiness and handover
+## 16. T4 — Report intake UI: what the patch implements
 
-| Phase | Status |
-|---|---|
-| T1 — Security lockdown | Completed (merged) |
-| T2 — Canonical schema | Completed (merged `4cf75f0`, deployed, smoke-tested) |
-| T3 — Hybrid AI and App Check | Implemented in a patch; completed after the owner applies, verifies, configures (15.8) and merges it |
-| T4 — Report intake UI | **Next** |
-| T5 onwards | Pending |
+### 16.1 Objective and result
+Citizen `/home` now has: a **full free-text report form** with a **Leaflet location picker** and an **optional, confirm-first AI suggestion panel**; **offline-first, non-blocking submission** for the form, Quick Start and one-tap SOS; and **truthful synchronisation feedback** (header badge, status card, history rows, result cards) derived from Firestore snapshot metadata. No Firestore rules, indexes, schema, API routes, auth or Firebase configuration changed. No new env var. No Cloud Function, no paid service.
 
-### 16.1 T4 scope (not started)
-Citizen report intake UI on `/home`: a **free-text report form** (description, language, category, people affected, injuries, optional `accessConditions`); location and affected-person details; **integration of the T3 AI suggestions** (optional, non-blocking) with **explicit human confirmation**; **translation** (`translatedDescription`, from the confirmed suggestion only); **SOS kept separate** (one-tap SOS: correct category/location handling, never any AI, never auto-deduplicated); non-blocking offline-first submission (do not `await` server acknowledgement; use snapshot `hasPendingWrites`); clear pending/synced/failed states; replace the hard-coded "connected / all synchronized" `SyncStatusCard` text; truthful processing indicators. The T4 line in section 14 has the full wording.
+### 16.2 Files
+**New**
+- `lib/utils/submit-flow.ts` — Firebase-free `startSubmission` state machine (injected `write`/`fallback`/tracker); `settled` never rejects; fallback only after the direct write was REJECTED (never while pending offline).
+- `lib/firebase/submission-tracker.ts` — in-memory observable tracker (`saved-locally | synced | failed`), keeps the validated input only for failed items so Retry reuses the same `reportId`. Singleton `submissionTracker`; `createSubmissionTracker()` for tests.
+- `lib/hooks/use-submissions.ts` (`useSubmissions`, `useSubmission`), `lib/hooks/use-online-status.ts` (`navigator.onLine` hint, wording only).
+- `lib/utils/report-sync.ts` — `summarizeSync` (checking / failed / offline-pending / offline-idle / sending / unconfirmed / all-sent), `displaySyncState`, `mergeFailedSubmissions`, `describeSubmission` wording.
+- `lib/utils/location-math.ts` — `normalizeLatLng` (round to 6 decimals, wrap longitude, reject lat outside ±90), `parseCoordinateInput`, `formatCoordinates`.
+- `components/citizen/report-form.tsx`, `ai-suggestion-panel.tsx`, `location-picker.tsx`, `leaflet-map.tsx`.
+- `tests/citizen/{location-math,report-sync,submit-flow,mapper-sync-meta,ai-isolation}.test.ts` (28 tests).
 
-### 16.2 T3 interface contract T4 must use
-- `classifyReportText(description, { signal? })` -> `ClassifyOutcome` (`lib/ai/classify-report.ts`). One call per user action (for example an "Get AI suggestion" button), never before submit, never awaited by submit; call `cancelClassification()` when the user submits or edits.
-- `prepareOnDeviceModel(onProgress?)` only from a click handler; `getOnDeviceAvailability()` for a status line; `preloadAiSdk()` on mount of the form.
-- Show `AI_FAILURE_MESSAGES[code]` on failure and keep the manual pickers working; show `AI_SUGGESTION_NOTICE` and `AI_DISCLAIMER`.
-- Prefill nothing without confirmation. Apply `peopleAffectedStated` only when non-null and confirmed (otherwise leave the user's/default value). Apply `translation` to `translatedDescription` only when confirmed. Use `urgencyChange(selected, suggestion.urgency)`: never lower silently.
-- The badge (`source`, `lowConfidence`, `retriedInCloud`) is transient UI state. **Never** put it into the created document; `createReport`/`buildNewReportFields` already force `processedBy: "manual"` and `confidenceScore: null`.
-- Do not call the AI module for the SOS cards.
-- Decide in T4's plan whether `/ai-check` is removed or kept admin-only.
+**Modified**
+- `lib/firebase/firestore.ts` — `createReport` split into shared `prepareReport` + `postReportToServer`; **`createReport` keeps its signature and behaviour** (awaits the backend, same fallback, throws the original Firestore error if both fail). New `submitReport(data, {kind})` (returns `{reportId, settled}` at once), `retrySubmission`, `retryFailedSubmissions`. `subscribeToUserRequests` now uses `includeMetadataChanges: true`, reads `docSnap.data({serverTimestamps: "estimate"})`, and passes an optional second callback argument `{fromCache, hasPendingWrites}` (existing callers unaffected; responder listeners untouched).
+- `lib/types/report.ts` — `mapReportToCitizenRequest(report, meta?)`: with `meta` the sync state comes from Firestore (`hasPendingWrites` => "Pending sync"), without it the legacy `syncedAt` inference is unchanged; adds `syncedAtMs`. `lib/types/citizen-request.ts` — `SyncState` gains `"Failed"`; optional `syncedAtMs`, `failure`.
+- `components/citizen/emergency-cta-card.tsx` (SOS: same payload, now `submitReport`; real `SyncStatusCard`; props `pendingCount`/`lastSyncedTime` replaced by `syncSummary`/`onRetryFailed`), `quick-start-section.tsx` (non-blocking, honest outcome, new "Add details & location" button via `onAddDetails`), `request-history-section.tsx` (no demo rows, real empty state, Failed rows with Retry, "Urgency" label, rewritten delivery note; the component no longer subscribes by itself), `request-status-pills.tsx` (`Pill` exported, Failed tone), `citizen-header.tsx` (real badge via `syncSummary`), `app/(user)/home/page.tsx` (computes the summary once and wires everything).
+- `package.json`/`package-lock.json` (Leaflet + types only), `README.md`/`documentation.md` (maps/offline rows made truthful), this file.
 
-### 16.3 T4 patch status and application order
-**No T4 implementation patch was found** in the T3 handover materials (the uploaded files were this document and the project ZIP; the GitHub repository has no T4 branch or patch). Therefore no `T4_IMPLEMENTATION_UPDATED.patch` was produced in the T3 iteration, and nothing was invented. If the owner has an earlier T4 patch, it must be supplied; it must then be re-based on T3 and adjusted to 16.2. **Required order:** apply and merge T3 (and complete 15.8) first, then T4. T4 depends on T3's `lib/ai/*`, `lib/firebase/app-check.ts` and `lib/constants/ai.ts`.
+**Deliberately untouched:** `firestore.rules`, `firestore.indexes.json`, `lib/constants/report.ts`, `lib/validation/report.ts`, `lib/ai/*`, `lib/firebase/{config,auth,app-check}.ts`, all `app/api/*`, responder dashboards, `/ai-check`, `.env.example`.
 
-### 16.4 Still open / deferred
-Owner decisions: removal of `/ai-check`; whether to enable authenticated-users mode or replay protection later; Option B provenance (needs a rules change, so only with T4's payload). Deferred: dashboard data/summaries/mock removal (T5); dedupe/escalation (T6); alerts and `geoCells` (T7); PWA shell, seed and docs alignment (T8); rotating the old test passwords and account linking for anonymous users (owner decision).
+### 16.3 Architecture
+**Submission.** `submitReport` -> `prepareReport` (same validator/builder as T2; throws synchronously on invalid input before anything is written or tracked) -> `startSubmission`: tracker `begin` -> `setDoc` (applied to the local Firestore cache immediately, queued in IndexedDB offline; its promise settles only on backend acknowledgement and is NOT awaited by the UI) -> on resolve `markSynced`; on rejection call `/api/reports` once (idempotent by `reportId`: own retry => 200 `duplicate: true`) -> success `markSynced`, failure `markFailed` (keeps the input). The UI returns at once with the new `reportId`.
+**Truth model.** Two independent, both truthful sources: (1) the history list/badge/status card use Firestore snapshot metadata (`hasPendingWrites` per document, `fromCache` per snapshot); (2) the result cards of reports submitted in THIS session use the tracker (`saved-locally` while online reads "Sending…"; only `synced` reads "received"). "All sent" requires online + nothing pending + nothing failed + snapshot not from cache. Nothing says or implies a responder has seen or will act on a report. `navigator.onLine === false` is reliable; `true` is only a hint, so it affects wording only.
+**Location.** `LocationPicker` = `LeafletMap` (dynamic, `ssr:false`, own chunk + CSS; not in the landing/login/home initial HTML) + "Use my location" (`getCurrentLocation`, click only) + typed latitude/longitude + optional landmark (becomes `location.address` only when typed; `zone` is never sent by the form). Pin is a `divIcon` with inline styles (no marker images). Longitude is wrapped (`latlng.wrap` equivalent) so the rules' ±180 limit is never violated. Tile errors (3 in a row) or `!navigator.onLine` show a notice; the form never depends on the map.
+**AI.** `AiSuggestionPanel` calls `classifyReportText` only from the "Get AI suggestion (optional)" button; submit calls `cancelClassification()` and never waits for AI. Review card: transient source badge, low-confidence caution, `AI_SUGGESTION_NOTICE` + `AI_DISCLAIMER`, one **unchecked** checkbox per field, "Apply selected". Lowering urgency (`urgencyChange === "lower"`) shows a warning and needs its own differently-worded confirmation. `peopleAffectedStated` only when non-null. A translation is attached to `translatedDescription` only when confirmed, is editable/removable, and is dropped (not sent) if the description changes afterwards. Editing the description makes a shown suggestion stale (cannot be applied) and cancels a running request. After apply the values are ordinary editable fields; nothing about AI is stored.
+**SOS.** `EmergencyCtaCard` payload is byte-for-byte the previous one (`medical`, `critical`, canned text, `isSOS: true`, location from `getCurrentLocation`); only the submit call (non-blocking) and the feedback wording changed. It imports nothing from `lib/ai/*` (enforced by `tests/citizen/ai-isolation.test.ts`). If geolocation is denied the SOS still fails with the existing message (unchanged: a location is required by the schema).
+
+### 16.4 T3 interface contract as used by T4 (kept for T5+)
+`classifyReportText`, `cancelClassification`, `prepareOnDeviceModel` (click only), `getOnDeviceAvailability`, `preloadAiSdk`, `urgencyChange`, `AI_FAILURE_MESSAGES`, `AI_SUGGESTION_NOTICE`, `AI_DISCLAIMER`. The AI badge is transient UI state and is never written to a document (`processedBy: "manual"`, `confidenceScore: null`).
+
+### 16.5 Known limitations (read before touching reporting)
+1. **Failure tracking is session-only.** A write queued offline stays in Firestore's own IndexedDB queue and is sent by the SDK later, even after a reload. If the server then REJECTS it after a reload, the SDK drops it, no promise exists any more, and nothing in the app can tell: the report simply never appears. The in-memory tracker is NOT persistent failure recovery. Rejection should be very unlikely: client and server share one validator/builder and a drift test, and the rules were verified against the same shape.
+2. A failed submission is shown in history (with Retry) only until the page is reloaded.
+3. **First use offline is not possible**: `signInAnonymously` needs the network once. `/home` is behind `RoleGate`, so anyone who reaches the form already has a persisted identity; the landing-page emergency button offline still fails (T8 PWA shell territory).
+4. OSM tiles need a connection and OSM's usage policy applies (attribution shown; no prefetch/bulk/offline caching). The tile host sees the user's IP and viewport. If a Content-Security-Policy is ever added, allow `tile.openstreetmap.org` (+ data/inline styles used by Leaflet).
+5. Language defaults to English and is a user choice (English/Bengali/Hindi/Other = `und`, or a code from a confirmed AI suggestion). It is not auto-detected.
+6. `Saved on this device` is shown for pending writes whether or not the device is online; "Sending…" vs "Saved offline" wording depends on the browser's online hint.
+7. Quick Start still submits a canned description and hard-coded urgency (`critical` for medical, else `high`), exactly as before.
+8. The history row for a report that is pending shows operational status as "Not yet received" (not the mapper's `Submitted`).
+
+### 16.6 Verification executed by the agent (scratch Linux clone of the supplied ZIP normalised to LF, `npm ci`, 2026-11-27)
+- `npx tsc --noEmit`: clean (baseline clean).
+- `npx tsx --test tests/ai/*.test.ts tests/security/*.test.ts tests/schema/*.test.ts tests/citizen/*.test.ts`: **112/112 pass** (baseline 84/84 + 28 new).
+- `npx eslint .`: **22 errors / 10 warnings** (baseline 29 / 10; no finding in any new file; the reduction comes from removing old `any` in rewritten components).
+- `next build`: succeeds (Turbopack, 12 routes). **Requires the public Firebase variables**; the scratch build used dummy placeholder values because the ZIP has no `.env.local`. Leaflet's JS and CSS are emitted as separate chunks and are absent from the prerendered HTML of `/`, `/home` and `/login`.
+- `git diff --check` clean; patch verified with `git apply --check --ignore-whitespace` on a fresh CRLF copy of the ZIP.
+
+**NOT executed by the agent:** Firestore rules emulator (rules unchanged), any browser run (offline/online transitions, Leaflet rendering, geolocation, DevTools Offline), real Firebase, App Check/AI in production, Vercel. Nothing was deployed.
+
+### 16.7 Owner checks (T4 acceptance, about 20 minutes; desktop Chrome + one phone)
+1. `npm ci`, `npm run dev`; sign in/emergency access; open `/home`.
+2. DevTools Network -> Offline: submit the form; expect "Saved on this device", header "Offline · 1 waiting", history row "Saved offline". Reload while offline (row stays). Go online: row flips to Synchronized, exactly one document in Firestore, `processedBy: "manual"`, `confidenceScore: null`, `location` has `lat`/`lng` (+ `address` only if typed).
+3. Repeat with Quick Start and one-tap SOS (SOS payload unchanged: `medical`, `critical`, `isSOS: true`).
+4. AI (online, production domain or localhost debug token): write text, press "Get AI suggestion"; nothing changes until you tick a field and press Apply; try a lower-urgency case; edit the text and confirm the suggestion goes stale; submit with AI unavailable/offline.
+5. Map: tap, drag the pin, "Use my location", type coordinates, go offline (notice appears, submit still works).
+6. Mobile viewport: SOS stays first; form usable.
+7. Optional: force a failure (for example sign out in another tab) and confirm "Failed" + Retry creates no duplicate.
+
+### 16.8 Open items and recommended T5 starting points
+- T5 owns: responder dashboards still use mock fallbacks and report success when the server rejects; `LiveMap`/`FieldMap` are CSS mocks (Leaflet can be reused via a shared map component, but keep the citizen picker separate); `limit(100)`; filters; summaries.
+- Owner decisions still open: SOS category routing (D4), Option B provenance (needs a rules change; not needed so far), removing `/ai-check` later, rotating old test passwords.
+- Deferred: dedupe/escalation (T6), alerts (T7), PWA shell/seed/docs alignment (T8).
 
 ## 17. Notes for the next agent
 
