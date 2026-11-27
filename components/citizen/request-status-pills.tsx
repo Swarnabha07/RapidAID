@@ -5,7 +5,7 @@ import type {
   SyncState,
 } from "@/lib/types/citizen-request";
 
-function Pill({ tone, children }: { tone: "red" | "amber" | "green" | "slate"; children: React.ReactNode }) {
+export function Pill({ tone, children }: { tone: "red" | "amber" | "green" | "slate"; children: React.ReactNode }) {
   const toneClass = {
     red: "bg-red-50 text-red-700",
     amber: "bg-amber-50 text-amber-700",
@@ -26,7 +26,8 @@ export function RequestUrgencyPill({ value }: { value: RequestUrgency }) {
 }
 
 export function SyncPill({ value }: { value: SyncState }) {
-  const tone = value === "Synchronized" ? "green" : value === "Pending sync" ? "amber" : "slate";
+  const tone =
+    value === "Synchronized" ? "green" : value === "Failed" ? "red" : "amber";
   return <Pill tone={tone}>{value}</Pill>;
 }
 

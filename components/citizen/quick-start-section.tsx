@@ -10,10 +10,21 @@ import {
   CircleEllipsis,
   Loader2,
   CheckCircle2,
+  Clock,
+  AlertCircle,
+  RotateCcw,
+  FilePenLine,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ensureEmergencyUser } from "@/lib/firebase/auth";
-import { createReport, type CreateReportInput } from "@/lib/firebase/firestore";
+import {
+  retrySubmission,
+  submitReport,
+  type CreateReportInput,
+} from "@/lib/firebase/firestore";
+import { useSubmission } from "@/lib/hooks/use-submissions";
+import { useOnlineStatus } from "@/lib/hooks/use-online-status";
+import { describeSubmission } from "@/lib/utils/report-sync";
 import type { ReportCategory } from "@/lib/types/report";
 import { Button } from "@/components/ui/button";
 import { getCurrentLocation } from "@/lib/utils/get-current-location";
@@ -45,21 +56,31 @@ export interface QuickStartSectionProps {
     categoryLabel: string,
     category: ReportCategory,
   ) => void;
+  /** Opens the full report form with this category pre-selected (T4). */
+  onAddDetails?: (category: ReportCategory) => void;
 }
 
 export function QuickStartSection({
   onSubmitCategoryReport,
   onCategorySelected,
+  onAddDetails,
 }: QuickStartSectionProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{
+    type: "success" | "error";
+    message: string;
+  } | null>(null);
+  const [quickReportId, setQuickReportId] = useState<string | null>(null);
+  const online = useOnlineStatus();
+  const quickSubmission = useSubmission(quickReportId);
 
   const selectedCategoryObj = CATEGORIES.find((cat) => cat.label === selected);
 
   const handleSelect = (cat: (typeof CATEGORIES)[number]) => {
     setSelected(cat.label);
     setFeedback(null);
+    setQuickReportId(null);
     if (onCategorySelected) {
       onCategorySelected(cat.label, cat.category);
     }
@@ -70,6 +91,7 @@ export function QuickStartSection({
 
     setSubmitting(true);
     setFeedback(null);
+    setQuickReportId(null);
 
     try {
       const emergencyUser = await ensureEmergencyUser();
@@ -81,35 +103,48 @@ export function QuickStartSection({
             userId: emergencyUser.uid,
           },
         );
-        setFeedback(`Report for ${selectedCategoryObj.label} submitted.`);
+        setFeedback({
+          type: "success",
+          message: `Report for ${selectedCategoryObj.label} submitted.`,
+        });
       } else {
         const location = await getCurrentLocation();
 
         const isMedical = selectedCategoryObj.category === "medical";
         const urgency = isMedical ? "critical" : "high";
 
-        const reportId = await createReport({
-          userId: emergencyUser.uid,
-          category: selectedCategoryObj.category,
-          urgency,
-          isSOS: false,
-          description: `Citizen emergency request for ${selectedCategoryObj.label}. Logged via Quick Start portal.`,
-          location,
-        });
-
-        setFeedback(`Request logged! Report #${reportId.slice(0, 8)} created.`);
+        // Non-blocking: saved on this device at once (even offline), sent in the background.
+        // The payload is unchanged from before T4.
+        const { reportId } = submitReport(
+          {
+            userId: emergencyUser.uid,
+            category: selectedCategoryObj.category,
+            urgency,
+            isSOS: false,
+            description: `Citizen emergency request for ${selectedCategoryObj.label}. Logged via Quick Start portal.`,
+            location,
+          },
+          { kind: "quick-start" },
+        );
+        setQuickReportId(reportId);
       }
     } catch (err: unknown) {
       console.error("Quick start report submission error:", err);
-      setFeedback(
-        err instanceof Error
-          ? err.message
-          : "Failed to submit request. Please try again.",
-      );
+      setFeedback({
+        type: "error",
+        message:
+          err instanceof Error
+            ? err.message
+            : "Failed to submit request. Please try again.",
+      });
     } finally {
       setSubmitting(false);
     }
   };
+
+  const outcome = quickSubmission
+    ? describeSubmission("quick-start", quickSubmission.state, online)
+    : null;
 
   return (
     <section>
@@ -121,7 +156,7 @@ export function QuickStartSection({
           What kind of help do you need?
         </h2>
         <p className="max-w-xs text-[13px] text-text-secondary">
-          Select the closest match. You can add more details next.
+          Select the closest match to send right away, or add details and a map location.
         </p>
       </div>
 
@@ -155,27 +190,87 @@ export function QuickStartSection({
       </div>
 
       {selected && (
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius-md)] border border-brand-blue/20 bg-brand-blue/5 p-4">
-          <div className="text-[13px]">
-            <span className="font-semibold text-text-primary">Selected:</span>{" "}
-            <span className="text-brand-blue font-medium">{selected}</span>
-            {feedback && (
-              <span className="ml-3 inline-flex items-center gap-1 text-emerald-700 font-medium">
-                <CheckCircle2 size={14} /> {feedback}
-              </span>
-            )}
+        <div className="mt-4 rounded-[var(--radius-md)] border border-brand-blue/20 bg-brand-blue/5 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="text-[13px]">
+              <span className="font-semibold text-text-primary">Selected:</span>{" "}
+              <span className="text-brand-blue font-medium">{selected}</span>
+              {feedback && (
+                <span
+                  role={feedback.type === "error" ? "alert" : "status"}
+                  className={`ml-3 inline-flex items-center gap-1 font-medium ${
+                    feedback.type === "error" ? "text-red-700" : "text-emerald-700"
+                  }`}
+                >
+                  {feedback.type === "error" ? (
+                    <AlertCircle size={14} />
+                  ) : (
+                    <CheckCircle2 size={14} />
+                  )}{" "}
+                  {feedback.message}
+                </span>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {onAddDetails && selectedCategoryObj && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => onAddDetails(selectedCategoryObj.category)}
+                  disabled={submitting}
+                >
+                  <FilePenLine size={14} /> Add details &amp; location
+                </Button>
+              )}
+              <Button
+                size="sm"
+                onClick={handleQuickSubmit}
+                disabled={submitting}
+                className="bg-brand-blue hover:brightness-110"
+              >
+                {submitting && (
+                  <Loader2 size={14} className="mr-1.5 animate-spin" />
+                )}
+                {submitting ? "Submitting..." : `Submit ${selected} Request`}
+              </Button>
+            </div>
           </div>
-          <Button
-            size="sm"
-            onClick={handleQuickSubmit}
-            disabled={submitting}
-            className="bg-brand-blue hover:brightness-110"
-          >
-            {submitting && (
-              <Loader2 size={14} className="mr-1.5 animate-spin" />
-            )}
-            {submitting ? "Submitting..." : `Submit ${selected} Request`}
-          </Button>
+
+          {outcome && quickSubmission && (
+            <div
+              role={outcome.tone === "error" ? "alert" : "status"}
+              className={`mt-3 flex flex-wrap items-start gap-2 text-[13px] ${
+                outcome.tone === "success"
+                  ? "text-emerald-800"
+                  : outcome.tone === "pending"
+                    ? "text-amber-900"
+                    : "text-red-800"
+              }`}
+            >
+              {outcome.tone === "success" ? (
+                <CheckCircle2 size={14} className="mt-0.5" />
+              ) : outcome.tone === "pending" ? (
+                <Clock size={14} className="mt-0.5" />
+              ) : (
+                <AlertCircle size={14} className="mt-0.5" />
+              )}
+              <span>
+                <span className="font-semibold">
+                  {outcome.title} · Report #{quickSubmission.reportId.slice(0, 8)}.
+                </span>{" "}
+                {outcome.body}
+              </span>
+              {quickSubmission.state === "failed" && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => retrySubmission(quickSubmission.reportId)}
+                >
+                  <RotateCcw size={14} /> Try again
+                </Button>
+              )}
+            </div>
+          )}
         </div>
       )}
     </section>

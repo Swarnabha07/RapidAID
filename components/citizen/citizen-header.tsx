@@ -4,8 +4,9 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Bell, LogOut } from "lucide-react";
 import { useAuth } from "@/lib/firebase/auth";
+import type { SyncSummary } from "@/lib/utils/report-sync";
 
-export function CitizenHeader() {
+export function CitizenHeader({ syncSummary }: { syncSummary?: SyncSummary }) {
   const { user, profile, signOutUser } = useAuth();
   const router = useRouter();
   const [signingOut, setSigningOut] = useState(false);
@@ -50,11 +51,32 @@ export function CitizenHeader() {
         </div>
 
         <div className="flex items-center gap-3">
-          <span className="hidden items-center gap-1.5 rounded-full border border-black/8 bg-subtle px-3 py-1.5 text-xs font-medium text-text-primary sm:flex">
-            <span className="h-1.5 w-1.5 rounded-full bg-normal" />
-            Online
-            <span className="mx-1 h-3 w-px bg-black/10" />
-            <span className="text-text-secondary">Synchronized</span>
+          <span
+            className="hidden items-center gap-1.5 rounded-full border border-black/8 bg-subtle px-3 py-1.5 text-xs font-medium text-text-primary sm:flex"
+            role="status"
+          >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${
+                !syncSummary
+                  ? "bg-black/25"
+                  : syncSummary.tone === "green"
+                    ? "bg-normal"
+                    : syncSummary.tone === "red"
+                      ? "bg-critical"
+                      : syncSummary.tone === "amber"
+                        ? "bg-high"
+                        : "bg-black/25"
+              }`}
+            />
+            {syncSummary ? (
+              <>
+                {syncSummary.online ? "Online" : "Offline"}
+                <span className="mx-1 h-3 w-px bg-black/10" />
+                <span className="text-text-secondary">{syncSummary.badge}</span>
+              </>
+            ) : (
+              <span className="text-text-secondary">Checking…</span>
+            )}
           </span>
 
           <button
